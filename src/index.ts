@@ -1,1 +1,1 @@
-export { Effect } from './Effect';
+export { Effect } from './Effect.js';
