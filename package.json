@@ -1,0 +1,20 @@
+{
+  "name": "effect-fluent",
+  "version": "0.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Matt Phillips",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mattphillips/effect-fluent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mattphillips/effect-fluent/issues"
+  },
+  "homepage": "https://github.com/mattphillips/effect-fluent#readme"
+}
