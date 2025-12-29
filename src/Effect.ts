@@ -1,6 +1,7 @@
-import { Effect as _Effect, Cause, Exit, FiberId, Scope } from 'effect';
+import { Effect as _Effect, Cause, Exit, FiberId, Function, Scope } from 'effect';
 import { LazyArg } from 'effect/Function';
 import { hasProperty } from 'effect/Predicate';
+import { NotFunction } from 'effect/Types';
 import { YieldWrap, yieldWrapGet } from 'effect/Utils';
 
 /**
@@ -739,8 +740,93 @@ export class Effect<A, E = never, R = never> {
   }
 
   flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {
-    _Effect.provide;
     return new Effect(_Effect.flatMap(this.effect, (a) => f(a).asEffect));
+  }
+
+  static flatten<A, E1, R1, E, R>(self: Effect<Effect<A, E1, R1>, E, R>): Effect<A, E | E1, R | R1> {
+    return new Effect(_Effect.flatten(self.map((e) => e.asEffect).asEffect));
+  }
+
+  andThen<X>(
+    f: ((a: NoInfer<A>) => X) | NotFunction<X>
+  ): [X] extends [Effect<infer A1, infer E1, infer R1>]
+    ? Effect<A1, E | E1, R | R1>
+    : [X] extends [PromiseLike<infer A1>]
+    ? Effect<A1, E | Cause.UnknownException, R>
+    : Effect<X, E, R> {
+    return new Effect(
+      _Effect.andThen(this.effect, (a) => {
+        const x = Function.isFunction(f) ? f(a) : f;
+
+        if (Effect.is(x)) {
+          return x.asEffect;
+        } else {
+          return x;
+        }
+      })
+    ) as any;
+  }
+
+  tap<X>(
+    f: (a: NoInfer<A>) => X
+  ): [X] extends [Effect<infer _A1, infer E1, infer R1>]
+    ? Effect<A, E | E1, R | R1>
+    : [X] extends [PromiseLike<infer _A1>]
+    ? Effect<A, E | Cause.UnknownException, R>
+    : Effect<A, E, R>;
+  tap<X, E1, R1>(f: (a: NoInfer<A>) => Effect<X, E1, R1>, options: { onlyEffect: true }): Effect<A, E | E1, R | R1>;
+  tap<X>(
+    f: NotFunction<X>
+  ): [X] extends [Effect<infer _A1, infer E1, infer R1>]
+    ? Effect<A, E | E1, R | R1>
+    : [X] extends [PromiseLike<infer _A1>]
+    ? Effect<A, E | Cause.UnknownException, R>
+    : Effect<A, E, R>;
+  tap<X, E1, R1>(f: Effect<X, E1, R1>, options: { onlyEffect: true }): Effect<A, E | E1, R | R1>;
+  tap<X, E1, R1>(
+    f: ((a: NoInfer<A>) => X) | ((a: NoInfer<A>) => Effect<X, E1, R1>) | NotFunction<X> | Effect<X, E1, R1>,
+    options?: { onlyEffect: true }
+  ): Effect<A, E | E1, R | R1> {
+    const extractValue = (u: unknown) => {
+      if (Effect.is(u)) {
+        return u.asEffect as any;
+      } else {
+        return u;
+      }
+    };
+
+    if (Function.isFunction(f)) {
+      if (options === undefined) {
+        return new Effect(_Effect.tap(this.effect, (a) => extractValue(f(a)))) as any;
+      }
+      return new Effect(_Effect.tap(this.effect, (a) => extractValue(f(a)), options));
+    } else {
+      if (options === undefined) {
+        return new Effect(_Effect.tap(this.effect, () => extractValue(f))) as any;
+      }
+
+      return new Effect(_Effect.tap(this.effect, () => extractValue(f), options));
+    }
+  }
+
+  tapError<X, E2, R2>(f: (e: NoInfer<E>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapError(this.effect, (e) => f(e).asEffect));
+  }
+
+  tapDefect<X, E2, R2>(f: (cause: Cause.Cause<never>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapDefect(this.effect, (cause) => f(cause).asEffect));
+  }
+
+  tapBoth<X, E2, R2, X1, E3, R3>(options: {
+    readonly onFailure: (e: E) => Effect<X, E2, R2>;
+    readonly onSuccess: (a: A) => Effect<X1, E3, R3>;
+  }): Effect<A, E | E2 | E3, R | R2 | R3> {
+    return new Effect(
+      _Effect.tapBoth(this.effect, {
+        onFailure: (e) => options.onFailure(e).asEffect,
+        onSuccess: (a) => options.onSuccess(a).asEffect
+      })
+    );
   }
 
   get exit(): Effect<Exit.Exit<A, E>, never, R> {
