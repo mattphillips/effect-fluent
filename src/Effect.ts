@@ -639,6 +639,43 @@ export class Effect<A, E = never, R = never> {
 
   private constructor(private readonly effect: _Effect.Effect<A, E, R>) {}
 
+  map<B>(f: (a: A) => B): Effect<B, E, R> {
+    return new Effect(_Effect.map(this.effect, f));
+  }
+
+  mapError<E2>(f: (e: E) => E2): Effect<A, E2, R> {
+    _Effect.mapBoth;
+    return new Effect(_Effect.mapError(this.effect, f));
+  }
+
+  mapErrorCause<E2>(f: (cause: Cause.Cause<E>) => Cause.Cause<E2>): Effect<A, E2, R> {
+    return new Effect(_Effect.mapErrorCause(this.effect, f));
+  }
+
+  mapBoth<A2, E2>(options: { readonly onFailure: (e: E) => E2; readonly onSuccess: (a: A) => A2 }): Effect<A2, E2, R> {
+    return new Effect(_Effect.mapBoth(this.effect, options));
+  }
+
+  as<B>(value: B): Effect<B, E, R> {
+    return new Effect(_Effect.as(this.effect, value));
+  }
+
+  get asVoid(): Effect<void, E, R> {
+    return new Effect(_Effect.asVoid(this.effect));
+  }
+
+  get flip(): Effect<E, A, R> {
+    return new Effect(_Effect.flip(this.effect));
+  }
+
+  flipWith<A2, E2, R2>(f: (effect: Effect<E, A, R>) => Effect<E2, A2, R2>): Effect<A2, E2, R2> {
+    return new Effect(_Effect.flipWith(this.effect, (effect) => f(new Effect(effect)).asEffect));
+  }
+
+  get merge(): Effect<A | E, never, R> {
+    return new Effect(_Effect.merge(this.effect));
+  }
+
   get asEffect(): _Effect.Effect<A, E, R> {
     return this.effect;
   }
