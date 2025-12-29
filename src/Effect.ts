@@ -1,5 +1,6 @@
 import { Effect as _Effect, Cause, FiberId } from 'effect';
 import { LazyArg } from 'effect/Function';
+import { YieldWrap, yieldWrapGet } from 'effect/Utils';
 
 export class Effect<A, E = never, R = never> {
   /**
@@ -595,9 +596,68 @@ export class Effect<A, E = never, R = never> {
     return new Effect(_Effect.suspend(() => effect().asEffect));
   }
 
+  // TODO: Add docs
+  static gen<Eff extends YieldWrap<_Effect.Effect<any, any, any>> | YieldWrap<Effect<any, any, any>>, AEff>(
+    f: (resume: Adapter) => Generator<Eff, AEff, never>
+  ): Effect<
+    AEff,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : never,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : never
+  > {
+    // Convert the generator to work with Effects
+    return new Effect(
+      _Effect.gen(function* () {
+        const generator = f(adapter);
+        let result = generator.next();
+
+        while (!result.done) {
+          const value = result.value;
+          // Unwrap YieldWrap and convert Effect to Effect if needed
+          const unwrapped = yieldWrapGet(value as YieldWrap<_Effect.Effect<any, any, any>>);
+          // TODO: Replace `instanceof` with a more robust check
+          const effect = unwrapped instanceof Effect ? unwrapped.effect : unwrapped;
+          const nextValue = yield* effect;
+          result = generator.next(nextValue as never);
+        }
+
+        return result.value;
+      })
+    );
+  }
+
   private constructor(private readonly effect: _Effect.Effect<A, E, R>) {}
 
   get asEffect(): _Effect.Effect<A, E, R> {
     return this.effect;
   }
+
+  // Make Effect iterable - delegates to the underlying Effect
+  [Symbol.iterator]() {
+    return this.effect[Symbol.iterator]();
+  }
 }
+
+interface Adapter {
+  <A, E, R>(self: _Effect.Effect<A, E, R>): _Effect.Effect<A, E, R>;
+  <A, E, R>(self: Effect<A, E, R>): Effect<A, E, R>;
+}
+
+const adapter: Adapter = ((self: any) => {
+  // TODO: Replace `instanceof` with a more robust check
+  if (self instanceof Effect) {
+    return self;
+  }
+  return self;
+}) as Adapter;
