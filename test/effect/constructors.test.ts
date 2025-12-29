@@ -7,14 +7,14 @@ describe('Effect', () => {
   describe('success constructors', () => {
     it.effect('succeed lifts a value to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.succeed(42).asEffect;
+        const result = yield* Effect.succeed(42);
         strictEqual(result, 42);
       });
     });
 
     it.effect('void lifts a void to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.void().asEffect;
+        const result = yield* Effect.void();
         strictEqual(result, undefined);
       });
     });
@@ -24,7 +24,7 @@ describe('Effect', () => {
     it.effect('fail lifts an error to an effect', () => {
       return _Effect.gen(function* () {
         const error = new Error('Failed');
-        const result = yield* Effect.fail(error).asEffect.pipe(_Effect.flip);
+        const result = yield* Effect.fail(error).flip;
         strictEqual(result, error);
       });
     });
@@ -32,7 +32,7 @@ describe('Effect', () => {
     it.effect('failSync lifts a thunk to an effect', () => {
       return _Effect.gen(function* () {
         const error = new Error('Failed');
-        const result = yield* Effect.failSync(() => error).asEffect.pipe(_Effect.flip);
+        const result = yield* Effect.failSync(() => error).flip;
         strictEqual(result, error);
       });
     });
@@ -41,7 +41,7 @@ describe('Effect', () => {
       return _Effect.gen(function* () {
         const error = new Error('Failed');
         const cause = Cause.fail(error);
-        const result = yield* Effect.failCause(cause).asEffect.pipe(_Effect.flip);
+        const result = yield* Effect.failCause(cause).flip;
         strictEqual(result, error);
       });
     });
@@ -50,7 +50,7 @@ describe('Effect', () => {
       return _Effect.gen(function* () {
         const error = new Error('Failed');
         const cause = Cause.fail(error);
-        const result = yield* Effect.failCauseSync(() => cause).asEffect.pipe(_Effect.flip);
+        const result = yield* Effect.failCauseSync(() => cause).flip;
         strictEqual(result, error);
       });
     });
@@ -92,7 +92,7 @@ describe('Effect', () => {
   describe('sync constructors', () => {
     it.effect('sync lifts a thunk to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.sync(() => 42).asEffect;
+        const result = yield* Effect.sync(() => 42);
         strictEqual(result, 42);
       });
     });
@@ -100,14 +100,14 @@ describe('Effect', () => {
     describe('try', () => {
       it.effect('lifts a thunk to an effect', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.try(() => 42).asEffect;
+          const result = yield* Effect.try(() => 42);
           strictEqual(result, 42);
         });
       });
 
       it.effect('lifts an options object to an effect', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.try({ try: () => 42, catch: (error) => error }).asEffect;
+          const result = yield* Effect.try({ try: () => 42, catch: (error) => error });
           strictEqual(result, 42);
         });
       });
@@ -120,7 +120,7 @@ describe('Effect', () => {
               throw error;
             },
             catch: (error) => error
-          }).asEffect.pipe(_Effect.flip);
+          }).flip;
           strictEqual(result, error);
         });
       });
@@ -130,7 +130,7 @@ describe('Effect', () => {
   describe('async constructors', () => {
     it.effect('promise lifts a promise to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.promise(() => Promise.resolve(42)).asEffect;
+        const result = yield* Effect.promise(() => Promise.resolve(42));
         strictEqual(result, 42);
       });
     });
@@ -138,14 +138,14 @@ describe('Effect', () => {
     describe('tryPromise', () => {
       it.effect('lifts a promise to an effect', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.tryPromise(() => Promise.resolve(42)).asEffect;
+          const result = yield* Effect.tryPromise(() => Promise.resolve(42));
           strictEqual(result, 42);
         });
       });
 
       it.effect('lifts a promise to an effect with an options object', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.tryPromise({ try: () => Promise.resolve(42), catch: (error) => error }).asEffect;
+          const result = yield* Effect.tryPromise({ try: () => Promise.resolve(42), catch: (error) => error });
           strictEqual(result, 42);
         });
       });
@@ -156,7 +156,7 @@ describe('Effect', () => {
           const result = yield* Effect.tryPromise({
             try: () => Promise.reject(error),
             catch: (error) => error
-          }).asEffect.pipe(_Effect.flip);
+          }).flip;
           strictEqual(result, error);
         });
       });
@@ -165,14 +165,14 @@ describe('Effect', () => {
     describe('async', () => {
       it.effect('lifts a resume function to an effect', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.async((callback) => callback(Effect.succeed(42))).asEffect;
+          const result = yield* Effect.async((callback) => callback(Effect.succeed(42)));
           strictEqual(result, 42);
         });
       });
 
       it.effect('lifts a resume function to an effect', () => {
         return _Effect.gen(function* () {
-          const result = yield* Effect.async((callback) => callback(Effect.succeed(42))).asEffect;
+          const result = yield* Effect.async((callback) => callback(Effect.succeed(42)));
           strictEqual(result, 42);
         });
       });
@@ -183,7 +183,7 @@ describe('Effect', () => {
         return _Effect.gen(function* () {
           const result = yield* Effect.asyncEffect<number, never, never, never, never, never>((callback) =>
             Effect.succeed(callback(Effect.succeed(42)))
-          ).asEffect;
+          );
           strictEqual(result, 42);
         });
       });
@@ -193,14 +193,14 @@ describe('Effect', () => {
   describe('other constructors', () => {
     it.effect('of lifts an effect to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.of(_Effect.succeed(42)).asEffect;
+        const result = yield* Effect.of(_Effect.succeed(42));
         strictEqual(result, 42);
       });
     });
 
     it.effect('suspend lifts a lazy effect to an effect', () => {
       return _Effect.gen(function* () {
-        const result = yield* Effect.suspend(() => Effect.succeed(42)).asEffect;
+        const result = yield* Effect.suspend(() => Effect.succeed(42));
         strictEqual(result, 42);
       });
     });
