@@ -1,12 +1,12 @@
-import { describe, it } from '@effect/vitest';
-import { deepStrictEqual, strictEqual } from '@effect/vitest/utils';
 import { Effect as _Effect, Context } from 'effect';
 import { Effect } from '../../src/Effect.js';
+import { describe, it } from '../../src/vitest/index.js';
+import { deepStrictEqual, strictEqual } from '../../src/vitest/utils.js';
 
 describe('Effect', () => {
   describe('gen', () => {
     it.effect('fluent effects can be yielded from the primitive gen', () => {
-      return _Effect.gen(function* () {
+      return Effect.gen(function* () {
         const result = yield* Effect.succeed(42);
         strictEqual(result, 42);
       });
@@ -16,14 +16,14 @@ describe('Effect', () => {
       return Effect.gen(function* () {
         const result = yield* _Effect.succeed(42);
         strictEqual(result, 42);
-      }).asEffect;
+      });
     });
 
     it.effect('fluent effects can be yielded from the fluent gen', () => {
       return Effect.gen(function* () {
         const result = yield* Effect.succeed(42);
         strictEqual(result, 42);
-      }).asEffect;
+      });
     });
 
     it.effect('mixing fluent and primitive effects is supported', () => {
@@ -31,7 +31,7 @@ describe('Effect', () => {
         const result = yield* Effect.succeed(42);
         const result2 = yield* _Effect.succeed(42);
         strictEqual(result + result2, 84);
-      }).asEffect;
+      });
     });
 
     it.effect('primitve services can be yielded from the fluent gen', () => {
@@ -50,7 +50,8 @@ describe('Effect', () => {
         deepStrictEqual(result, [1]);
       }).asEffect.pipe(
         // TODO: Replace `provideService` with a more fluent version
-        _Effect.provideService(Database, { query: () => _Effect.succeed([1]) })
+        _Effect.provideService(Database, { query: () => _Effect.succeed([1]) }),
+        Effect.of
       );
     });
 
@@ -70,7 +71,8 @@ describe('Effect', () => {
         deepStrictEqual(result, [1]);
       }).asEffect.pipe(
         // TODO: Replace `provideService` with a more fluent version
-        _Effect.provideService(Database, { query: () => Effect.succeed([1]) })
+        _Effect.provideService(Database, { query: () => Effect.succeed([1]) }),
+        Effect.of
       );
     });
   });

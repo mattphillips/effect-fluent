@@ -1,4 +1,4 @@
-import { Effect as _Effect, Cause, FiberId } from 'effect';
+import { Effect as _Effect, Cause, FiberId, Scope } from 'effect';
 import { LazyArg } from 'effect/Function';
 import { YieldWrap, yieldWrapGet } from 'effect/Utils';
 
@@ -674,6 +674,15 @@ export class Effect<A, E = never, R = never> {
 
   get merge(): Effect<A | E, never, R> {
     return new Effect(_Effect.merge(this.effect));
+  }
+
+  flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {
+    _Effect.provide;
+    return new Effect(_Effect.flatMap(this.effect, (a) => f(a).asEffect));
+  }
+
+  get scoped(): Effect<A, E, Exclude<R, Scope.Scope>> {
+    return new Effect(_Effect.scoped(this.effect));
   }
 
   get asEffect(): _Effect.Effect<A, E, R> {
