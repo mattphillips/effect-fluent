@@ -1,4 +1,4 @@
-import { Effect as _Effect, Cause } from 'effect';
+import { Cause } from 'effect';
 import { Effect } from '../../src/Effect.js';
 import { describe, it } from '../../src/vitest/index.js';
 import { assertFailure, strictEqual } from '../../src/vitest/utils.js';
@@ -97,8 +97,7 @@ describe('Effect', () => {
     describe('flip', () => {
       it.effect('successful effects are flipped', () => {
         return Effect.gen(function* () {
-          // TODO: Replace `exit` with a more fluent version
-          const result = yield* Effect.succeed(42).flip.asEffect.pipe(_Effect.exit);
+          const result = yield* Effect.succeed(42).flip.exit;
           assertFailure(result, Cause.fail(42));
         });
       });
@@ -114,9 +113,7 @@ describe('Effect', () => {
     describe('flipWith', () => {
       it.effect('successful effects are flipped with a function', () => {
         return Effect.gen(function* () {
-          const result = yield* Effect.succeed(42)
-            .flipWith(() => Effect.succeed(84))
-            .asEffect.pipe(_Effect.exit);
+          const result = yield* Effect.succeed(42).flipWith(() => Effect.succeed(84)).exit;
           assertFailure(result, Cause.fail(84));
         });
       });
