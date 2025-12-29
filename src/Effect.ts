@@ -369,8 +369,7 @@ export class Effect<A, E = never, R = never> {
     return new Effect(
       _Effect.async<A, E, R>((callback, signal) => {
         const effect = resume((effect: Effect<A, E, R>) => callback(effect.asEffect), signal);
-        // TODO: Replace `instanceof` with a more robust check
-        if (effect instanceof Effect) {
+        if (Effect.is(effect)) {
           return effect.asEffect;
         }
         return effect;
@@ -383,18 +382,14 @@ export class Effect<A, E = never, R = never> {
   ): Effect<A, E | E2, R | R2 | R3> {
     return new Effect(
       _Effect.asyncEffect<A, E, R, R3, E2, R2>((callback) => {
-        const effect = register((effect) => callback(effect.asEffect)).asEffect;
+        const effect = register((effect) => callback(effect.asEffect));
 
-        return effect.pipe(
-          // TODO: Replace `flatMap` when it's available in the Effect type
-          _Effect.flatMap((e) => {
-            // TODO: Replace `instanceof` with a more robust check
-            if (e instanceof Effect) {
-              return e.asEffect;
-            }
-            return _Effect.void;
-          })
-        ) as any;
+        return effect.flatMap((e) => {
+          if (Effect.is(e)) {
+            return e as any;
+          }
+          return Effect.void;
+        }).asEffect as any;
       })
     );
   }
@@ -694,8 +689,7 @@ export class Effect<A, E = never, R = never> {
           const value = result.value;
           // Unwrap YieldWrap and convert Effect to Effect if needed
           const unwrapped = yieldWrapGet(value as YieldWrap<_Effect.Effect<any, any, any>>);
-          // TODO: Replace `instanceof` with a more robust check
-          const effect = unwrapped instanceof Effect ? unwrapped.effect : unwrapped;
+          const effect = Effect.is(unwrapped) ? unwrapped.effect : unwrapped;
           const nextValue = yield* effect;
           result = generator.next(nextValue as never);
         }
@@ -773,8 +767,7 @@ interface Adapter {
 }
 
 const adapter: Adapter = ((self: any) => {
-  // TODO: Replace `instanceof` with a more robust check
-  if (self instanceof Effect) {
+  if (Effect.is(self)) {
     return self;
   }
   return self;
