@@ -614,8 +614,48 @@ export class Effect<A, E = never, R = never> {
   }
 
   // TODO: Add docs
+  static gen<This, Eff extends YieldWrap<_Effect.Effect<any, any, any>> | YieldWrap<Effect<any, any, any>>, AEff>(
+    thisArg: This,
+    f: (this: This, resume: Adapter) => Generator<Eff, AEff, never>
+  ): Effect<
+    AEff,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : never,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : never
+  >;
   static gen<Eff extends YieldWrap<_Effect.Effect<any, any, any>> | YieldWrap<Effect<any, any, any>>, AEff>(
     f: (resume: Adapter) => Generator<Eff, AEff, never>
+  ): Effect<
+    AEff,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer E, infer _R>>]
+      ? E
+      : never,
+    [Eff] extends [never]
+      ? never
+      : [Eff] extends [YieldWrap<_Effect.Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : [Eff] extends [YieldWrap<Effect<infer _A, infer _E, infer R>>]
+      ? R
+      : never
+  >;
+  static gen<This, Eff extends YieldWrap<_Effect.Effect<any, any, any>> | YieldWrap<Effect<any, any, any>>, AEff>(
+    thisArgOrF: This | ((resume: Adapter) => Generator<Eff, AEff, never>),
+    f?: (this: This, resume: Adapter) => Generator<Eff, AEff, never>
   ): Effect<
     AEff,
     [Eff] extends [never]
@@ -636,7 +676,18 @@ export class Effect<A, E = never, R = never> {
     // Convert the generator to work with Effects
     return new Effect(
       _Effect.gen(function* () {
-        const generator = f(adapter);
+        let generator: Generator<Eff, AEff, never>;
+
+        if (f !== undefined) {
+          // Two-argument form: thisArg and generator function
+          const thisArg = thisArgOrF as This;
+          generator = f.call(thisArg, adapter);
+        } else {
+          // Single-argument form: just generator function
+          const genFunc = thisArgOrF as (resume: Adapter) => Generator<Eff, AEff, never>;
+          generator = genFunc(adapter);
+        }
+
         let result = generator.next();
 
         while (!result.done) {

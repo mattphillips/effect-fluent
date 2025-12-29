@@ -75,5 +75,19 @@ describe('Effect', () => {
         Effect.of
       );
     });
+
+    it.effect('can pass this to generator', () => {
+      class MyService {
+        readonly local = 1;
+        compute = Effect.gen(this, function* () {
+          return yield* Effect.succeed(this.local + 1);
+        });
+      }
+      const instance = new MyService();
+
+      return instance.compute.map((n) => {
+        strictEqual(n, 2);
+      });
+    });
   });
 });
