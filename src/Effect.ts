@@ -1,8 +1,25 @@
 import { Effect as _Effect, Cause, FiberId, Scope } from 'effect';
 import { LazyArg } from 'effect/Function';
+import { hasProperty } from 'effect/Predicate';
 import { YieldWrap, yieldWrapGet } from 'effect/Utils';
 
+/**
+ * @category Symbols
+ */
+export const EffectTypeId: unique symbol = Symbol.for('effect-fluent/Effect') as EffectTypeId;
+
+/**
+ * @category Symbols
+ */
+export type EffectTypeId = typeof EffectTypeId;
+
 export class Effect<A, E = never, R = never> {
+  readonly [EffectTypeId]: EffectTypeId = EffectTypeId;
+
+  static is(u: unknown): u is Effect<unknown, unknown, unknown> {
+    return hasProperty(u, EffectTypeId);
+  }
+
   /**
    * Creates an `Effect` from an existing `Effect` primitive.
    *
