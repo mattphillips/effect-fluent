@@ -506,9 +506,25 @@ describe('Option', () => {
     assertNone(Option.all({ a: Option.some(1), b: Option.none() }));
   });
 
-  //   it('.pipe()', () => {
-  //     assertSome(Option.some(1).pipe(Option.map((n) => n + 1)), 2);
-  //   });
+  it('pipe', () => {
+    assertSome(
+      Option.some(1).pipe((opt) => opt.map((n) => n + 1)),
+      2
+    );
+    assertSome(
+      Option.some(1).pipe(
+        (opt) => opt.map((n) => n + 1),
+        (opt) => opt.filter((n) => n > 0)
+      ),
+      2
+    );
+    assertNone(
+      Option.some(1).pipe(
+        (opt) => opt.map((n) => n + 1),
+        (opt) => opt.filter((n) => n > 10)
+      )
+    );
+  });
 
   it('lift2', () => {
     const f = Option.lift2((a: number, b: number): number => a + b);

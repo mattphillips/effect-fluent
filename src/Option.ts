@@ -2,14 +2,14 @@ import { Option as _Option, Equal, Hash, Inspectable, Order, Either, Equivalence
 import { type LazyArg, dual, isFunction } from 'effect/Function';
 import { TypeLambda } from 'effect/HKT';
 import { NodeInspectSymbol } from 'effect/Inspectable';
-import { hasProperty, isObject, type Predicate, type Refinement } from 'effect/Predicate';
+import { pipeArguments } from 'effect/Pipeable';
+import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NotFunction, NoInfer } from 'effect/Types';
 import * as Gen from 'effect/Utils';
 
 /*
 TODO:
 - Effect prototype
-- Pipeable
 */
 
 export const TypeId: unique symbol = Symbol.for('effect-fluent/Option');
@@ -176,6 +176,15 @@ abstract class OptionBase<A> implements Inspectable.Inspectable {
 
   bindTo<N extends string>(name: N): Option<{ [K in N]: A }> {
     return Option.of(_Option.bindTo(this.option, name));
+  }
+
+  pipe<B>(ab: (a: Option<A>) => B): B;
+  pipe<B, C>(ab: (a: Option<A>) => B, bc: (b: B) => C): C;
+  pipe<B, C, D>(ab: (a: Option<A>) => B, bc: (b: B) => C, cd: (c: C) => D): D;
+  pipe<B, C, D, E>(ab: (a: Option<A>) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: E) => E): E;
+  pipe<B, C, D, E, F>(ab: (a: Option<A>) => B, bc: (b: B) => C, cd: (c: C) => D, de: (d: E) => E, ef: (e: F) => F): F;
+  pipe(...args: any): any {
+    return pipeArguments(this, args);
   }
 
   get asOption(): _Option.Option<A> {
