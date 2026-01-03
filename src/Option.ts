@@ -187,6 +187,21 @@ abstract class OptionBase<A> implements Inspectable.Inspectable {
     return pipeArguments(this, args);
   }
 
+  bind<N extends string, B>(
+    name: Exclude<N, keyof A>,
+    f: (a: NoInfer<A>) => Option<B>
+  ): A extends object ? Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> : Option<never> {
+    if (this.isNone()) {
+      return Option.none<never>() as any;
+    }
+
+    if (this.isSome() && isObject(this.value)) {
+      return Option.of(_Option.bind(this.asOption as any, name, (a) => f(a as any).asOption)) as any;
+    } else {
+      return Option.none<never>() as any;
+    }
+  }
+
   get asOption(): _Option.Option<A> {
     return this.option;
   }
