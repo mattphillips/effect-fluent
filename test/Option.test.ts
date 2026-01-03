@@ -442,25 +442,19 @@ describe('Option', () => {
 
   it('ap', () => {
     assertNone(
-      pipe(
-        Option.some((a: number) => (b: number) => a + b),
-        Option.ap(Option.none()),
-        Option.ap(Option.some(2))
-      )
+      Option.some((a: number) => (b: number) => a + b)
+        .ap(Option.none())
+        .ap(Option.some(2))
     );
     assertNone(
-      pipe(
-        Option.some((a: number) => (b: number) => a + b),
-        Option.ap(Option.some(1)),
-        Option.ap(Option.none())
-      )
+      Option.some((a: number) => (b: number) => a + b)
+        .ap(Option.some(1))
+        .ap(Option.none())
     );
     assertSome(
-      pipe(
-        Option.some((a: number) => (b: number) => a + b),
-        Option.ap(Option.some(1)),
-        Option.ap(Option.some(2))
-      ),
+      Option.some((a: number) => (b: number) => a + b)
+        .ap(Option.some(1))
+        .ap(Option.some(2)),
       3
     );
   });
@@ -545,7 +539,7 @@ describe('Option', () => {
       assertSome(
         Option.some(1)
           .bindTo('__proto__')
-          .pipe(Option.bind('x', () => Option.some(2))),
+          .bind('x', () => Option.some(2)),
         { x: 2, __proto__: 1 }
       );
     });
@@ -554,7 +548,7 @@ describe('Option', () => {
       assertSome(
         Option.some(1)
           .bindTo('a')
-          .pipe(Option.bind('b', ({ a }) => Option.some(a + 1))),
+          .bind('b', ({ a }) => Option.some(a + 1)),
         {
           a: 1,
           b: 2
@@ -564,22 +558,20 @@ describe('Option', () => {
       assertNone(
         Option.some(1)
           .bindTo('a')
-          .pipe(Option.bind('b', () => Option.none()))
+          .bind('b', () => Option.none())
       );
 
       assertNone(
         Option.none()
           .bindTo('a')
-          .pipe(Option.bind('b', () => Option.some(2)))
+          .bind('b', () => Option.some(2))
       );
 
       assertSome(
         Option.some(1)
           .bindTo('a')
-          .pipe(
-            Option.bind('__proto__', ({ a }) => Option.some(a + 1)),
-            Option.bind('b', ({ a }) => Option.some(a + 1))
-          ),
+          .bind('__proto__', ({ a }) => Option.some(a + 1))
+          .bind('b', ({ a }) => Option.some(a + 1)),
         { a: 1, b: 2, __proto__: 2 }
       );
     });
@@ -588,21 +580,19 @@ describe('Option', () => {
       assertSome(
         Option.some(1)
           .bindTo('a')
-          .pipe(Option.let('b', ({ a }) => a + 1)),
+          .let('b', ({ a }) => a + 1),
         { a: 1, b: 2 }
       );
       assertNone(
         Option.none()
           .bindTo('a')
-          .pipe(Option.let('b', () => 2))
+          .let('b', () => 2)
       );
       assertSome(
         Option.some(1)
           .bindTo('a')
-          .pipe(
-            Option.let('__proto__', ({ a }) => a + 1),
-            Option.let('b', ({ a }) => a + 1)
-          ),
+          .let('__proto__', ({ a }) => a + 1)
+          .let('b', ({ a }) => a + 1),
         { a: 1, b: 2, __proto__: 2 }
       );
     });

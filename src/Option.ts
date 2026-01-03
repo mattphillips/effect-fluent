@@ -3,7 +3,7 @@ import { type LazyArg, dual, isFunction } from 'effect/Function';
 import { TypeLambda } from 'effect/HKT';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { pipeArguments } from 'effect/Pipeable';
-import { hasProperty, isObject, type Predicate, type Refinement } from 'effect/Predicate';
+import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NotFunction, NoInfer } from 'effect/Types';
 import * as Gen from 'effect/Utils';
 
@@ -26,6 +26,7 @@ export interface OptionUnify<A extends { [Unify.typeSymbol]?: any }> {
 
 export interface OptionUnifyIgnore {}
 
+// TODO: rename this `OptionBase` to `Option`
 abstract class OptionBase<A> implements Inspectable.Inspectable {
   abstract readonly _tag: 'Some' | 'None';
   abstract readonly _op: 'Some' | 'None';
@@ -187,19 +188,26 @@ abstract class OptionBase<A> implements Inspectable.Inspectable {
     return pipeArguments(this, args);
   }
 
-  bind<N extends string, B>(
-    name: Exclude<N, keyof A>,
-    f: (a: NoInfer<A>) => Option<B>
-  ): A extends object ? Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> : Option<never> {
-    if (this.isNone()) {
-      return Option.none<never>() as any;
-    }
+  bind<X extends A & object, N extends string, B>(
+    this: Option<X>,
+    name: Exclude<N, keyof X>,
+    f: (a: NoInfer<X>) => Option<B>
+  ): Option<{ [K in N | keyof X]: K extends keyof X ? X[K] : B }> {
+    return Option.of(_Option.bind(this.asOption, name, (a) => f(a).asOption));
+  }
 
-    if (this.isSome() && isObject(this.value)) {
-      return Option.of(_Option.bind(this.asOption as any, name, (a) => f(a as any).asOption)) as any;
-    } else {
-      return Option.none<never>() as any;
-    }
+  let<X extends A & object, N extends string, B>(
+    this: Option<X>,
+    name: Exclude<N, keyof X>,
+    f: (a: NoInfer<X>) => B
+  ): Option<{
+    [K in N | keyof X]: K extends keyof X ? X[K] : B;
+  }> {
+    return Option.of(_Option.let(this.asOption, name, (a) => f(a)));
+  }
+
+  ap<A, B>(this: Option<(a: A) => B>, that: Option<A>): Option<B> {
+    return Option.of(_Option.ap(this.asOption, that.asOption));
   }
 
   get asOption(): _Option.Option<A> {
@@ -277,13 +285,13 @@ class None<A = never> extends OptionBase<A> {
 
 export type Option<A> = Some<A> | None<A>;
 
-const ap: {
-  <A>(that: Option<A>): <B>(self: Option<(a: A) => B>) => Option<B>;
-  <A, B>(self: Option<(a: A) => B>, that: Option<A>): Option<B>;
-} = dual(
-  2,
-  <A, B>(self: Option<(a: A) => B>, that: Option<A>): Option<B> => Option.of(_Option.ap(self.asOption, that.asOption))
-);
+// const ap: {
+//   <A>(that: Option<A>): <B>(self: Option<(a: A) => B>) => Option<B>;
+//   <A, B>(self: Option<(a: A) => B>, that: Option<A>): Option<B>;
+// } = dual(
+//   2,
+//   <A, B>(self: Option<(a: A) => B>, that: Option<A>): Option<B> => Option.of(_Option.ap(self.asOption, that.asOption))
+// );
 
 const reduceCompact: {
   <B, A>(b: B, f: (b: B, a: A) => B): (self: Iterable<Option<A>>) => B;
@@ -302,45 +310,45 @@ const liftPredicate: {
   return Option.of(_Option.liftPredicate(b, predicate));
 });
 
-export const bind: {
-  <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => Option<B>): (
-    self: Option<A>
-  ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
-  <A extends object, N extends string, B>(
-    self: Option<A>,
-    name: Exclude<N, keyof A>,
-    f: (a: NoInfer<A>) => Option<B>
-  ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
-} = dual(
-  3,
-  <N extends string, A extends object, B>(
-    self: Option<A>,
-    name: Exclude<N, keyof A>,
-    f: (a: NoInfer<A>) => Option<B>
-  ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
-    return Option.of(_Option.bind(self.asOption, name, (a) => f(a).asOption));
-  }
-);
+// export const bind: {
+//   <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => Option<B>): (
+//     self: Option<A>
+//   ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+//   <A extends object, N extends string, B>(
+//     self: Option<A>,
+//     name: Exclude<N, keyof A>,
+//     f: (a: NoInfer<A>) => Option<B>
+//   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+// } = dual(
+//   3,
+//   <N extends string, A extends object, B>(
+//     self: Option<A>,
+//     name: Exclude<N, keyof A>,
+//     f: (a: NoInfer<A>) => Option<B>
+//   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
+//     return Option.of(_Option.bind(self.asOption, name, (a) => f(a).asOption));
+//   }
+// );
 
-const let_: {
-  <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): (
-    self: Option<A>
-  ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
-  <A extends object, N extends string, B>(self: Option<A>, name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): Option<{
-    [K in N | keyof A]: K extends keyof A ? A[K] : B;
-  }>;
-} = dual(
-  3,
-  <N extends string, A extends object, B>(
-    self: Option<A>,
-    name: Exclude<N, keyof A>,
-    f: (a: NoInfer<A>) => B
-  ): Option<{
-    [K in N | keyof A]: K extends keyof A ? A[K] : B;
-  }> => {
-    return Option.of(_Option.let(self.asOption, name, (a) => f(a)));
-  }
-);
+// const let_: {
+//   <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): (
+//     self: Option<A>
+//   ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+//   <A extends object, N extends string, B>(self: Option<A>, name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): Option<{
+//     [K in N | keyof A]: K extends keyof A ? A[K] : B;
+//   }>;
+// } = dual(
+//   3,
+//   <N extends string, A extends object, B>(
+//     self: Option<A>,
+//     name: Exclude<N, keyof A>,
+//     f: (a: NoInfer<A>) => B
+//   ): Option<{
+//     [K in N | keyof A]: K extends keyof A ? A[K] : B;
+//   }> => {
+//     return Option.of(_Option.let(self.asOption, name, (a) => f(a)));
+//   }
+// );
 
 export const lift2 = <A, B, C>(
   f: (a: A, b: B) => C
@@ -508,14 +516,14 @@ export const Option = {
 
   gen,
 
-  ap,
+  // ap,
 
   get Do(): Option<{}> {
     return Option.some({});
-  },
+  }
 
-  bind,
-  let: let_
+  // bind,
+  // let: let_
 };
 
 export namespace Option {
