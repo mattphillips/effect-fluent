@@ -7,50 +7,50 @@ import { strictEqual } from 'assert';
 const gt2 = (n: number): boolean => n > 2;
 
 describe('Option', () => {
-  //   it('gen', () => {
-  //     const a = Option.gen(function* () {
-  //       const x = yield* Option.some(1);
-  //       const y = yield* Option.some(2);
-  //       return x + y;
-  //     });
-  //     const b = Option.gen(function* () {
-  //       return 10;
-  //     });
-  //     const c = Option.gen(function* () {
-  //       yield* Option.some(1);
-  //       yield* Option.some(2);
-  //     });
-  //     const d = Option.gen(function* () {
-  //       yield* Option.some(1);
-  //       return yield* Option.some(2);
-  //     });
-  //     const e = Option.gen(function* () {
-  //       yield* Option.some(1);
-  //       yield* Option.none();
-  //       return yield* Option.some(2);
-  //     });
-  //     const f = Option.gen(function* () {
-  //       yield* Option.none();
-  //     });
-  //     const g = Option.gen({ ctx: 'testContext' as const }, function* () {
-  //       return yield* Option.some(this.ctx);
-  //     });
-  //     // TODO(4.0) remove this test
-  //     // test adapter
-  //     const h = Option.gen(function* ($) {
-  //       const x = yield* $(Option.some(1));
-  //       const y = yield* $(Option.some(2));
-  //       return x + y;
-  //     });
-  //     assertSome(a, 3);
-  //     assertSome(b, 10);
-  //     assertSome(c, undefined);
-  //     assertSome(d, 2);
-  //     assertNone(e);
-  //     assertNone(f);
-  //     assertSome(g, 'testContext');
-  //     assertSome(h, 3);
-  //   });
+  it('gen', () => {
+    const a = Option.gen(function* () {
+      const x = yield* Option.some(1);
+      const y = yield* Option.some(2);
+      return x + y;
+    });
+    const b = Option.gen(function* () {
+      return 10;
+    });
+    const c = Option.gen(function* () {
+      yield* Option.some(1);
+      yield* Option.some(2);
+    });
+    const d = Option.gen(function* () {
+      yield* Option.some(1);
+      return yield* Option.some(2);
+    });
+    const e = Option.gen(function* () {
+      yield* Option.some(1);
+      yield* Option.none();
+      return yield* Option.some(2);
+    });
+    const f = Option.gen(function* () {
+      yield* Option.none();
+    });
+    const g = Option.gen({ ctx: 'testContext' as const }, function* (this: { ctx: 'testContext' }) {
+      return yield* Option.some(this.ctx);
+    });
+    // TODO(4.0) remove this test
+    // test adapter
+    const h = Option.gen(function* ($: any) {
+      const x = yield* $(Option.some(1));
+      const y = yield* $(Option.some(2));
+      return x + y;
+    });
+    assertSome(a, 3);
+    assertSome(b, 10);
+    assertSome(c, undefined);
+    assertSome(d, 2);
+    assertNone(e);
+    assertNone(f);
+    assertSome(g, 'testContext');
+    assertSome(h, 3);
+  });
 
   it('toString', () => {
     strictEqual(

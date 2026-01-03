@@ -1,8 +1,10 @@
-import { Option as _Option, Equal, Hash, Inspectable, Order, Either, Equivalence } from 'effect';
+import { Option as _Option, Equal, Hash, Inspectable, Order, Either, Equivalence, Unify } from 'effect';
 import { type LazyArg, dual, isFunction } from 'effect/Function';
+import { TypeLambda } from 'effect/HKT';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NotFunction, NoInfer } from 'effect/Types';
+import * as Gen from 'effect/Utils';
 
 /*
 TODO:
@@ -14,9 +16,27 @@ export const TypeId: unique symbol = Symbol.for('effect-fluent/Option');
 
 export type TypeId = typeof TypeId;
 
+export interface OptionTypeLambda extends TypeLambda {
+  readonly type: Option<this['Target']>;
+}
+
+export interface OptionUnify<A extends { [Unify.typeSymbol]?: any }> {
+  Option?: () => A[Unify.typeSymbol] extends Option<infer A0> | infer _ ? Option<A0> : never;
+}
+
+export interface OptionUnifyIgnore {}
+
 abstract class OptionBase<A> implements Inspectable.Inspectable {
   abstract readonly _tag: 'Some' | 'None';
   abstract readonly _op: 'Some' | 'None';
+
+  [Symbol.iterator]() {
+    return new Gen.SingleShotGen(new Gen.YieldWrap(this)) as any;
+  }
+
+  [Unify.typeSymbol]?: unknown;
+  [Unify.unifySymbol]?: OptionUnify<this>;
+  [Unify.ignoreSymbol]?: OptionUnifyIgnore;
 
   get [TypeId](): {
     readonly _A: Covariant<A>;
@@ -256,6 +276,47 @@ export const lift2 = <A, B, C>(
 } =>
   dual(2, (self: Option<A>, that: Option<B>): Option<C> => Option.of(_Option.lift2(f)(self.asOption, that.asOption)));
 
+const adapter = Gen.adapter<OptionTypeLambda>();
+
+const gen: Gen.Gen<OptionTypeLambda, Gen.Adapter<OptionTypeLambda>> = (...args) => {
+  let f: any;
+  if (args.length === 1) {
+    f = args[0];
+  } else {
+    f = args[1].bind(args[0]);
+  }
+  const iterator = f(adapter);
+  let state: IteratorYieldResult<any> | IteratorReturnResult<any> = iterator.next();
+  if (state.done) {
+    return Option.some(state.value);
+  } else {
+    let current = state.value;
+    if (Gen.isGenKind(current)) {
+      current = current.value;
+    } else {
+      current = Gen.yieldWrapGet(current);
+    }
+    if (Option.is(current) && current.isNone()) {
+      return current;
+    }
+    while (!state.done) {
+      state = iterator.next(current.value as never);
+      if (!state.done) {
+        current = state.value;
+        if (Gen.isGenKind(current)) {
+          current = current.value;
+        } else {
+          current = Gen.yieldWrapGet(current);
+        }
+        if (Option.is(current) && current.isNone()) {
+          return current;
+        }
+      }
+    }
+    return Option.some(state.value);
+  }
+};
+
 /**
  * Static methods for creating and working with Options
  */
@@ -370,6 +431,8 @@ export const Option = {
   },
 
   lift2,
+
+  gen,
 
   ap
 };
