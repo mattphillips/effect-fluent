@@ -2,7 +2,7 @@ import { Option as _Option, Equal, Hash, Inspectable, Order, Either, Equivalence
 import { type LazyArg, dual, isFunction } from 'effect/Function';
 import { TypeLambda } from 'effect/HKT';
 import { NodeInspectSymbol } from 'effect/Inspectable';
-import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
+import { hasProperty, isObject, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NotFunction, NoInfer } from 'effect/Types';
 import * as Gen from 'effect/Utils';
 
@@ -166,6 +166,16 @@ abstract class OptionBase<A> implements Inspectable.Inspectable {
 
   zipWith<B, C>(that: Option<B>, f: (a: A, b: B) => C): Option<C> {
     return Option.of(_Option.zipWith(this.option, that.asOption, f));
+  }
+
+  filter<B extends A>(refinement: Refinement<NoInfer<A>, B>): Option<B>;
+  filter(predicate: Predicate<NoInfer<A>>): Option<A>;
+  filter<B extends A>(predicate: Predicate<NoInfer<A>> | Refinement<NoInfer<A>, B>): Option<B> | Option<A> {
+    return Option.of(_Option.filter(this.option, predicate as any));
+  }
+
+  bindTo<N extends string>(name: N): Option<{ [K in N]: A }> {
+    return Option.of(_Option.bindTo(this.option, name));
   }
 
   get asOption(): _Option.Option<A> {
@@ -434,7 +444,11 @@ export const Option = {
 
   gen,
 
-  ap
+  ap,
+
+  get Do(): Option<{}> {
+    return Option.some({});
+  }
 };
 
 export namespace Option {
