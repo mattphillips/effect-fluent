@@ -542,77 +542,70 @@ describe('Option', () => {
     it('bindTo', () => {
       assertSome(Option.some(1).bindTo('a'), { a: 1 });
       assertNone(Option.none().bindTo('a'));
-      // assertSome(
-      //   Option.some(1)
-      //     .bindTo('__proto__')
-      //     .bind('x', () => Option.some(2)),
-      //   { x: 2, ['__proto__']: 1 }
-      // );
+      assertSome(
+        Option.some(1)
+          .bindTo('__proto__')
+          .pipe(Option.bind('x', () => Option.some(2))),
+        { x: 2, __proto__: 1 }
+      );
     });
 
-    //     it('bind', () => {
-    //       assertSome(
-    //         pipe(
-    //           Option.some(1),
-    //           Option.bindTo('a'),
-    //           Option.bind('b', ({ a }) => Option.some(a + 1))
-    //         ),
-    //         {
-    //           a: 1,
-    //           b: 2
-    //         }
-    //       );
-    //       assertNone(
-    //         pipe(
-    //           Option.some(1),
-    //           Option.bindTo('a'),
-    //           Option.bind('b', () => Option.none())
-    //         )
-    //       );
-    //       assertNone(
-    //         pipe(
-    //           Option.none(),
-    //           Option.bindTo('a'),
-    //           Option.bind('b', () => Option.some(2))
-    //         )
-    //       );
-    //       assertSome(
-    //         pipe(
-    //           Option.some(1),
-    //           Option.bindTo('a'),
-    //           Option.bind('__proto__', ({ a }) => Option.some(a + 1)),
-    //           Option.bind('b', ({ a }) => Option.some(a + 1))
-    //         ),
-    //         { a: 1, b: 2, ['__proto__']: 2 }
-    //       );
-    //     });
+    it('bind', () => {
+      assertSome(
+        Option.some(1)
+          .bindTo('a')
+          .pipe(Option.bind('b', ({ a }) => Option.some(a + 1))),
+        {
+          a: 1,
+          b: 2
+        }
+      );
 
-    //     it('let', () => {
-    //       assertSome(
-    //         pipe(
-    //           Option.some(1),
-    //           Option.bindTo('a'),
-    //           Option.let('b', ({ a }) => a + 1)
-    //         ),
-    //         { a: 1, b: 2 }
-    //       );
-    //       assertNone(
-    //         pipe(
-    //           Option.none(),
-    //           Option.bindTo('a'),
-    //           Option.let('b', () => 2)
-    //         )
-    //       );
-    //       assertSome(
-    //         pipe(
-    //           Option.some(1),
-    //           Option.bindTo('a'),
-    //           Option.let('__proto__', ({ a }) => a + 1),
-    //           Option.let('b', ({ a }) => a + 1)
-    //         ),
-    //         { a: 1, b: 2, ['__proto__']: 2 }
-    //       );
-    //     });
+      assertNone(
+        Option.some(1)
+          .bindTo('a')
+          .pipe(Option.bind('b', () => Option.none()))
+      );
+
+      assertNone(
+        Option.none()
+          .bindTo('a')
+          .pipe(Option.bind('b', () => Option.some(2)))
+      );
+
+      assertSome(
+        Option.some(1)
+          .bindTo('a')
+          .pipe(
+            Option.bind('__proto__', ({ a }) => Option.some(a + 1)),
+            Option.bind('b', ({ a }) => Option.some(a + 1))
+          ),
+        { a: 1, b: 2, __proto__: 2 }
+      );
+    });
+
+    it('let', () => {
+      assertSome(
+        Option.some(1)
+          .bindTo('a')
+          .pipe(Option.let('b', ({ a }) => a + 1)),
+        { a: 1, b: 2 }
+      );
+      assertNone(
+        Option.none()
+          .bindTo('a')
+          .pipe(Option.let('b', () => 2))
+      );
+      assertSome(
+        Option.some(1)
+          .bindTo('a')
+          .pipe(
+            Option.let('__proto__', ({ a }) => a + 1),
+            Option.let('b', ({ a }) => a + 1)
+          ),
+        { a: 1, b: 2, __proto__: 2 }
+      );
+    });
   });
 
   it('as', () => {

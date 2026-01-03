@@ -3,7 +3,7 @@ import { type LazyArg, dual, isFunction } from 'effect/Function';
 import { TypeLambda } from 'effect/HKT';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { pipeArguments } from 'effect/Pipeable';
-import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
+import { hasProperty, isObject, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NotFunction, NoInfer } from 'effect/Types';
 import * as Gen from 'effect/Utils';
 
@@ -287,6 +287,46 @@ const liftPredicate: {
   return Option.of(_Option.liftPredicate(b, predicate));
 });
 
+export const bind: {
+  <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => Option<B>): (
+    self: Option<A>
+  ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+  <A extends object, N extends string, B>(
+    self: Option<A>,
+    name: Exclude<N, keyof A>,
+    f: (a: NoInfer<A>) => Option<B>
+  ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+} = dual(
+  3,
+  <N extends string, A extends object, B>(
+    self: Option<A>,
+    name: Exclude<N, keyof A>,
+    f: (a: NoInfer<A>) => Option<B>
+  ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
+    return Option.of(_Option.bind(self.asOption, name, (a) => f(a).asOption));
+  }
+);
+
+const let_: {
+  <N extends string, A extends object, B>(name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): (
+    self: Option<A>
+  ) => Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }>;
+  <A extends object, N extends string, B>(self: Option<A>, name: Exclude<N, keyof A>, f: (a: NoInfer<A>) => B): Option<{
+    [K in N | keyof A]: K extends keyof A ? A[K] : B;
+  }>;
+} = dual(
+  3,
+  <N extends string, A extends object, B>(
+    self: Option<A>,
+    name: Exclude<N, keyof A>,
+    f: (a: NoInfer<A>) => B
+  ): Option<{
+    [K in N | keyof A]: K extends keyof A ? A[K] : B;
+  }> => {
+    return Option.of(_Option.let(self.asOption, name, (a) => f(a)));
+  }
+);
+
 export const lift2 = <A, B, C>(
   f: (a: A, b: B) => C
 ): {
@@ -457,7 +497,10 @@ export const Option = {
 
   get Do(): Option<{}> {
     return Option.some({});
-  }
+  },
+
+  bind,
+  let: let_
 };
 
 export namespace Option {
