@@ -1,4 +1,4 @@
-import { Chunk, Either, Equal, Hash, pipe, String as S, Number as N } from 'effect';
+import { Option as O, Chunk, Either, Equal, Hash, pipe, String as S, Number as N } from 'effect';
 import { Option } from '../src/Option.js';
 import { describe, it } from '../src/vitest/index.js';
 import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, throws } from '../src/vitest/utils.js';
@@ -606,6 +606,21 @@ describe('Option', () => {
   it('asVoid', () => {
     assertNone(Option.none().asVoid);
     assertSome(Option.some(1).asVoid, undefined);
+  });
+
+  it('with', () => {
+    assertNone(Option.none().with(O.map((n) => n + 1)));
+    assertSome(Option.some(1).with(O.map((n) => n + 1)), 2);
+    assertSome(
+      Option.some(1).with((_) =>
+        _.pipe(
+          O.map((n) => n + 1),
+          O.filter((n) => n > 0),
+          O.flatMap((n) => O.some(n + 1))
+        )
+      ),
+      3
+    );
   });
 
   //   it('[internal] mergeWith', () => {
