@@ -222,6 +222,10 @@ abstract class OptionBase<A> implements Inspectable.Inspectable {
     return Inspectable.format(this.toJSON());
   }
 
+  with<B>(f: (option: _Option.Option<A>) => _Option.Option<B>): Option<B> {
+    return Option.of(f(this.asOption));
+  }
+
   abstract toJSON(): unknown;
 
   abstract [Equal.symbol](that: unknown): boolean;
