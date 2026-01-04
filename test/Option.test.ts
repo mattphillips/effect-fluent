@@ -1,7 +1,7 @@
 import { Option as O, Chunk, Either, Equal, Hash, pipe, String as S, Number as N } from 'effect';
 import { Option } from '../src/Option.js';
 import { describe, it } from '../src/vitest/index.js';
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, throws } from '../src/vitest/utils.js';
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, fail, throws } from '../src/vitest/utils.js';
 import { strictEqual } from 'assert';
 
 const gt2 = (n: number): boolean => n > 2;
@@ -399,7 +399,13 @@ describe('Option', () => {
 
   it('isSome', () => {
     assertFalse(Option.none().isSome());
-    assertTrue(Option.some(1).isSome());
+    const o = Option.some(1);
+    assertTrue(o.isSome());
+    if (o.isSome()) {
+      strictEqual(o.value, 1);
+    } else {
+      fail('isSome should be true');
+    }
   });
 
   it('exists', () => {
