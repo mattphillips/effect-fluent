@@ -1,4 +1,5 @@
-import { Option as _Option, Either, Equal, Equivalence, Hash, Inspectable, Order, Unify } from 'effect';
+import { Option as _Option, Effect, Either, Equal, Equivalence, Hash, Inspectable, Order, Unify } from 'effect';
+import { Class } from 'effect/Effectable';
 import { dual, isFunction, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { pipeArguments } from 'effect/Pipeable';
@@ -6,12 +7,14 @@ import { hasProperty, type Predicate, type Refinement } from 'effect/Predicate';
 import { Covariant, NoInfer, NotFunction } from 'effect/Types';
 import * as Gen from 'effect/Utils';
 import type * as O from '../Option.js';
+import { NoSuchElementException } from 'effect/Cause';
 
 export const TypeId: unique symbol = Symbol.for('effect-fluent/Option');
 
 export type TypeId = typeof TypeId;
 
-abstract class Option<A> implements Inspectable.Inspectable {
+// TOOD: out A
+abstract class Option<A> extends Class<A, NoSuchElementException> implements Inspectable.Inspectable {
   abstract readonly _tag: 'Some' | 'None';
   abstract readonly _op: 'Some' | 'None';
 
@@ -20,7 +23,10 @@ abstract class Option<A> implements Inspectable.Inspectable {
   }
 
   [Unify.typeSymbol]?: unknown;
+  // @ts-expect-error
+  // TODO: fix this, it's colliding with the `Effectable.Class` `unifySymbol`
   [Unify.unifySymbol]?: O.OptionUnify<this>;
+  // @ts-ignore
   [Unify.ignoreSymbol]?: O.OptionUnifyIgnore;
 
   get [TypeId](): {
@@ -31,7 +37,13 @@ abstract class Option<A> implements Inspectable.Inspectable {
     };
   }
 
-  constructor(protected readonly option: _Option.Option<A>) {}
+  constructor(protected readonly option: _Option.Option<A>) {
+    super();
+  }
+
+  commit(): Effect.Effect<A, NoSuchElementException, never> {
+    return this.asOption;
+  }
 
   map<B>(f: (a: A) => B): O.Option<B> {
     return of(_Option.map(this.option, f));
@@ -164,6 +176,7 @@ abstract class Option<A> implements Inspectable.Inspectable {
   }
 
   // TODO: add more overloads for pipe
+  pipe<A>(this: A): A;
   pipe<B>(ab: (a: O.Option<A>) => B): B;
   pipe<B, C>(ab: (a: O.Option<A>) => B, bc: (b: B) => C): C;
   pipe<B, C, D>(ab: (a: O.Option<A>) => B, bc: (b: B) => C, cd: (c: C) => D): D;

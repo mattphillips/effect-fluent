@@ -1,12 +1,37 @@
-import { Option as O, Chunk, Either, Equal, Hash, pipe, String as S, Number as N } from 'effect';
+import { Option as O, Effect as _Effect, Chunk, Either, Equal, Hash, pipe, String as S, Number as N } from 'effect';
 import { Option } from '../src/Option.js';
 import { describe, it } from '../src/vitest/index.js';
 import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, fail, throws } from '../src/vitest/utils.js';
 import { strictEqual } from 'assert';
+import { Effect } from '../src/Effect.js';
+import { NoSuchElementException } from 'effect/Cause';
 
 const gt2 = (n: number): boolean => n > 2;
 
 describe('Option', () => {
+  describe('Effectable', () => {
+    // @ts-expect-error
+    // TODO: fix this it's not inferring the type of the effect due to the `[Symbol.iterator]` method
+    it.effect('some can be yielded from Effect.gen', () => {
+      return Effect.gen(function* () {
+        strictEqual(yield* Option.some(123), 123);
+      });
+    });
+
+    // @ts-expect-error
+    // TODO: fix this it's not inferring the type of the effect due to the `[Symbol.iterator]` method
+    it.effect('yielded none values are lifted to `NoSuchElementException`', () => {
+      const effect = Effect.gen(function* () {
+        yield* Option.none();
+      });
+
+      return Effect.gen(function* () {
+        const error = yield* effect.flip;
+        deepStrictEqual(error, new NoSuchElementException());
+      });
+    });
+  });
+
   it('gen', () => {
     const a = Option.gen(function* () {
       const x = yield* Option.some(1);
