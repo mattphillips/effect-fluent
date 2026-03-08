@@ -1,4 +1,4 @@
-import { Effect as _Effect, Cause, Scheduler, Scope } from 'effect';
+import { Effect as _Effect, Cause, Exit, Option, Scheduler, Scope } from 'effect';
 import type { LazyArg } from 'effect/Function';
 import { hasProperty } from 'effect/Predicate';
 
@@ -52,10 +52,6 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return new Effect(_Effect.void);
   }
 
-  static asVoid<A, E, R>(self: Effect<A, E, R>): Effect<void, E, R> {
-    return new Effect(_Effect.asVoid(self.asEffect()));
-  }
-
   static try<A, E>(options: { try: LazyArg<A>; catch: (error: unknown) => E }): Effect<A, E> {
     return new Effect(_Effect.try(options));
   }
@@ -80,7 +76,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     ) => void | Effect<void, never, R>
   ): Effect<A, E, R> {
     return new Effect(
-      _Effect.callback(function(this: Scheduler.Scheduler, resume, signal) {
+      _Effect.callback(function (this: Scheduler.Scheduler, resume, signal) {
         const result = register.call(this, (effect) => resume(effect.asEffect()), signal);
         if (result !== undefined) {
           return result.asEffect();
@@ -164,11 +160,31 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return new Effect(_Effect.map(this._effect, f));
   }
 
+  mapBoth<E2, A2>(options: { readonly onFailure: (e: E) => E2; readonly onSuccess: (a: A) => A2 }): Effect<A2, E2, R> {
+    return new Effect(_Effect.mapBoth(this._effect, options));
+  }
+
+  as<B>(value: B): Effect<B, E, R> {
+    return new Effect(_Effect.as(this._effect, value));
+  }
+
+  get asVoid(): Effect<void, E, R> {
+    return new Effect(_Effect.asVoid(this._effect));
+  }
+
+  get asSome(): Effect<Option.Option<A>, E, R> {
+    return new Effect(_Effect.asSome(this._effect));
+  }
+
   flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {
     return new Effect(_Effect.flatMap(this._effect, (a) => f(a).asEffect()));
   }
 
   get flip(): Effect<E, A, R> {
     return new Effect(_Effect.flip(this._effect));
+  }
+
+  get exit(): Effect<Exit.Exit<A, E>, never, R> {
+    return new Effect(_Effect.exit(this._effect));
   }
 }

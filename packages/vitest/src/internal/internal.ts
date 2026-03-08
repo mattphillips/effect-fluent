@@ -236,7 +236,7 @@ export const layer =
 
     if (args.length === 1) {
       V.beforeAll(
-        () => runPromise(Effect.asVoid(contextEffect)),
+        () => runPromise(contextEffect.asVoid),
         options?.timeout ? Duration.toMillis(Duration.fromInputUnsafe(options.timeout)) : undefined
       );
       V.afterAll(
@@ -249,7 +249,7 @@ export const layer =
 
     return V.describe(args[0], () => {
       V.beforeAll(
-        () => runPromise(Effect.asVoid(contextEffect)),
+        () => runPromise(contextEffect.asVoid),
         options?.timeout ? Duration.toMillis(Duration.fromInputUnsafe(options.timeout)) : undefined
       );
       V.afterAll(
