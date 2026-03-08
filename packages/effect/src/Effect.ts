@@ -1,8 +1,9 @@
-import { Effect as _Effect, Cause, Exit, Option, Scheduler, Scope } from 'effect';
+import { Effect as _Effect, Cause, Exit, Scheduler, Scope } from 'effect';
 import type { Filter } from 'effect/Filter';
 import type { LazyArg } from 'effect/Function';
 import { hasProperty, isFunction } from 'effect/Predicate';
 import type { ExtractTag, Tags } from 'effect/Types';
+import { Option } from './Option.js';
 
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
@@ -85,6 +86,10 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
         }
       })
     );
+  }
+
+  static fromOption<A>(option: Option<A>): Effect<A, Cause.NoSuchElementError> {
+    return new Effect(_Effect.fromOption(option.asOption()));
   }
 
   static gen<Eff extends _Effect.Yieldable<any, any, any, any>, AEff>(
@@ -174,8 +179,8 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return new Effect(_Effect.asVoid(this._effect));
   }
 
-  get asSome(): Effect<Option.Option<A>, E, R> {
-    return new Effect(_Effect.asSome(this._effect));
+  get asSome(): Effect<Option<A>, E, R> {
+    return this.map(Option.some);
   }
 
   flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {

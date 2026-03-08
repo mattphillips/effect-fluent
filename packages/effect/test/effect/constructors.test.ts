@@ -1,7 +1,8 @@
 import { describe, it } from '@effect-fluent/vitest';
-import { strictEqual } from '@effect-fluent/vitest/utils';
+import { deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
 import { Effect as _Effect, Cause } from 'effect';
 import { Effect } from '../../src/Effect.js';
+import { Option } from '../../src/Option.js';
 
 describe('Effect', () => {
   describe('constructors', () => {
@@ -165,6 +166,22 @@ describe('Effect', () => {
         return Effect.gen(function* () {
           const result = yield* Effect.suspend(() => Effect.succeed(42));
           strictEqual(result, 42);
+        });
+      });
+    });
+
+    describe('fromOption', () => {
+      it.effect('lifts option some to an effect', () => {
+        return Effect.gen(function* () {
+          const result = yield* Effect.fromOption(Option.some(42));
+          strictEqual(result, 42);
+        });
+      });
+
+      it.effect('lifts option none to an effect', () => {
+        return Effect.gen(function* () {
+          const result = yield* Effect.fromOption(Option.none()).flip;
+          deepStrictEqual(result, new Cause.NoSuchElementError());
         });
       });
     });
