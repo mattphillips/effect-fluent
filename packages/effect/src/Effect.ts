@@ -1,6 +1,8 @@
 import { Effect as _Effect, Cause, Exit, Option, Scheduler, Scope } from 'effect';
+import type { Filter } from 'effect/Filter';
 import type { LazyArg } from 'effect/Function';
-import { hasProperty } from 'effect/Predicate';
+import { hasProperty, isFunction } from 'effect/Predicate';
+import type { ExtractTag, Tags } from 'effect/Types';
 
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
@@ -178,6 +180,69 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
 
   flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {
     return new Effect(_Effect.flatMap(this._effect, (a) => f(a).asEffect()));
+  }
+
+  static flatten<A, E, R, E2, R2>(self: Effect<Effect<A, E, R>, E2, R2>): Effect<A, E | E2, R | R2> {
+    return self.flatMap((inner) => inner);
+  }
+
+  andThen<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2>;
+  andThen<B, E2, R2>(f: Effect<B, E2, R2>): Effect<B, E | E2, R | R2>;
+  andThen(f: any): Effect<any, any, any> {
+    if (isFunction(f)) {
+      return new Effect(
+        _Effect.andThen(this._effect, (a: A) => {
+          return f(a).asEffect();
+        })
+      );
+    }
+    return new Effect(_Effect.andThen(this._effect, f.asEffect()));
+  }
+
+  tap<B, E2, R2>(f: (a: NoInfer<A>) => Effect<B, E2, R2>): Effect<A, E | E2, R | R2>;
+  tap<B, E2, R2>(f: Effect<B, E2, R2>): Effect<A, E | E2, R | R2>;
+  tap(f: any): Effect<any, any, any> {
+    if (isFunction(f)) {
+      return new Effect(
+        _Effect.tap(this._effect, (a: NoInfer<A>) => {
+          return f(a).asEffect();
+        })
+      );
+    }
+    return new Effect(_Effect.tap(this._effect, f.asEffect()));
+  }
+
+  tapError<X, E2, R2>(f: (e: E) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapError(this._effect, (e) => f(e).asEffect()));
+  }
+
+  tapDefect<B, E2, R2>(f: (defect: unknown) => Effect<B, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapDefect(this._effect, (defect) => f(defect).asEffect()));
+  }
+
+  tapErrorTag<K extends Tags<E>, A1, E1, R1>(
+    k: K,
+    f: (e: ExtractTag<E, K>) => Effect<A1, E1, R1>
+  ): Effect<A, E | E1, R | R1> {
+    return new Effect(_Effect.tapErrorTag(this._effect, k, (e: any) => f(e).asEffect()));
+  }
+
+  tapCause<X, E2, R2>(f: (cause: Cause.Cause<E>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapCause(this._effect, (cause) => f(cause).asEffect()));
+  }
+
+  tapCauseIf<B, E2, R2>(
+    predicate: (cause: Cause.Cause<E>) => boolean,
+    f: (cause: Cause.Cause<E>) => Effect<B, E2, R2>
+  ): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapCauseIf(this._effect, predicate, (cause) => f(cause).asEffect()));
+  }
+
+  tapCauseFilter<B, E2, R2, EB, X extends Cause.Cause<any>>(
+    filter: Filter<Cause.Cause<E>, EB, X>,
+    f: (a: EB, cause: Cause.Cause<E>) => Effect<B, E2, R2>
+  ): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, cause).asEffect()));
   }
 
   get flip(): Effect<E, A, R> {
