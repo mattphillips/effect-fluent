@@ -1,5 +1,22 @@
 {
+  "$schema": "http://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.json",
-  "include": [],
-  "references": [{ "path": "tsconfig.src.json" }, { "path": "tsconfig.test.json" }]
+  "references": [{ "path": "tsconfig.packages.json" }],
+  "include": [
+    "./vitest.*.ts",
+    "./packages/*/vitest.*.ts",
+    "./packages/*/test/**/*.ts"
+  ],
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "erasableSyntaxOnly": false,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "effect-fluent/*": ["./packages/effect/src/*.ts"],
+      "@effect-fluent/vitest": ["./packages/vitest/src/index.ts"],
+      "@effect-fluent/vitest/*": ["./packages/vitest/src/*.ts"]
+    },
+  }
 }
