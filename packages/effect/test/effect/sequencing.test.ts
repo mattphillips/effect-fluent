@@ -47,7 +47,7 @@ describe('Effect', () => {
       );
     });
 
-    it.effect.skip('andThen', () =>
+    it.effect('andThen', () =>
       Effect.gen(function* () {
         const a1 = Effect.succeed(0).andThen(Effect.succeed(1));
         const a2 = Effect.succeed(0).andThen((n) => Effect.succeed(n + 1));

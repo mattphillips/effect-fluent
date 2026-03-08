@@ -1,6 +1,6 @@
 import { describe, it } from '@effect-fluent/vitest';
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual } from '@effect-fluent/vitest/utils';
-import { Result } from 'effect';
+import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
+import { Equal, Hash, Result } from 'effect';
 import { Option } from '../../src/Option.js';
 
 describe('Option', () => {
@@ -114,6 +114,42 @@ describe('Option', () => {
     it('isNone', () => {
       assertTrue(Option.none().isNone());
       assertFalse(Option.some(1).isNone());
+    });
+  });
+
+  describe('Equal', () => {
+    it('Some equals Some with same value', () => {
+      assertTrue(Equal.equals(Option.some(1), Option.some(1)));
+    });
+
+    it('Some not equal to Some with different value', () => {
+      assertFalse(Equal.equals(Option.some(1), Option.some(2)));
+    });
+
+    it('None equals None', () => {
+      assertTrue(Equal.equals(Option.none(), Option.none()));
+    });
+
+    it('Some not equal to None', () => {
+      assertFalse(Equal.equals(Option.some(1), Option.none()));
+    });
+
+    it('None not equal to Some', () => {
+      assertFalse(Equal.equals(Option.none(), Option.some(1)));
+    });
+
+    it('not equal to non-Option', () => {
+      assertFalse(Equal.equals(Option.some(1), 1 as any));
+    });
+  });
+
+  describe('Hash', () => {
+    it('equal values have equal hashes', () => {
+      strictEqual(Hash.hash(Option.some(1)), Hash.hash(Option.some(1)));
+    });
+
+    it('None has consistent hash', () => {
+      strictEqual(Hash.hash(Option.none()), Hash.hash(Option.none()));
     });
   });
 

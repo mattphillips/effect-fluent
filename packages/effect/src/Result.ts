@@ -1,4 +1,4 @@
-import { Effect as _Effect, Equivalence } from 'effect';
+import { Effect as _Effect, Equal, Equivalence, Hash } from 'effect';
 import type { LazyArg } from 'effect/Function';
 import { dual, identity } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
@@ -21,6 +21,7 @@ export interface ResultTypeLambda extends TypeLambda {
 abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Yieldable<Result<A, E>, A, E> {
   private readonly result: _Result.Result<A, E>;
   abstract readonly _tag: 'Success' | 'Failure';
+  abstract readonly _op: 'Success' | 'Failure';
   readonly [ResultTypeId]: ResultTypeId = ResultTypeId;
 
   constructor(result: _Result.Result<A, E>) {
@@ -30,6 +31,16 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
 
   asResult(): _Result.Result<A, E> {
     return this.result;
+  }
+
+  // --- Equal & Hash ---
+
+  [Equal.symbol](that: unknown): boolean {
+    return is(that) && Equal.equals(this.result, that.asResult());
+  }
+
+  [Hash.symbol](): number {
+    return Hash.hash(this.result);
   }
 
   // --- Type guards ---
@@ -159,6 +170,7 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
 
 export class Success<out A, out E> extends ResultBase<A, E> {
   readonly _tag = 'Success' as const;
+  readonly _op = 'Success' as const;
   readonly success: A;
 
   constructor(value: A) {
@@ -173,6 +185,7 @@ export class Success<out A, out E> extends ResultBase<A, E> {
 
 export class Failure<out A, out E> extends ResultBase<A, E> {
   readonly _tag = 'Failure' as const;
+  readonly _op = 'Failure' as const;
   readonly failure: E;
 
   constructor(error: E) {

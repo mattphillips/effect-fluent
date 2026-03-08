@@ -1,4 +1,4 @@
-import { Effect as _Effect, Cause, Equivalence, Result } from 'effect';
+import { Effect as _Effect, Cause, Equal, Equivalence, Hash, Result } from 'effect';
 import type { Filter } from 'effect/Filter';
 import { dual, type LazyArg } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
@@ -24,6 +24,7 @@ abstract class OptionBase<out A>
 {
   private readonly option: _Option.Option<A>;
   abstract readonly _tag: 'Some' | 'None';
+  abstract readonly _op: 'Some' | 'None';
   readonly [OptionTypeId]: OptionTypeId = OptionTypeId;
 
   constructor(option: _Option.Option<A>) {
@@ -33,6 +34,16 @@ abstract class OptionBase<out A>
 
   asOption(): _Option.Option<A> {
     return this.option;
+  }
+
+  // --- Equal & Hash ---
+
+  [Equal.symbol](that: unknown): boolean {
+    return is(that) && Equal.equals(this.option, that.asOption());
+  }
+
+  [Hash.symbol](): number {
+    return Hash.hash(this.option);
   }
 
   // --- Type guards ---
@@ -206,6 +217,7 @@ abstract class OptionBase<out A>
 
 export class Some<out A> extends OptionBase<A> {
   readonly _tag = 'Some' as const;
+  readonly _op = 'Some' as const;
   readonly value: A;
 
   constructor(value: A) {
@@ -220,6 +232,7 @@ export class Some<out A> extends OptionBase<A> {
 
 export class None<out A = never> extends OptionBase<A> {
   readonly _tag = 'None' as const;
+  readonly _op = 'None' as const;
 
   constructor() {
     super(_Option.none<A>());

@@ -6,8 +6,10 @@ import {
   assertSome,
   assertSuccess,
   assertTrue,
-  deepStrictEqual
+  deepStrictEqual,
+  strictEqual
 } from '@effect-fluent/vitest/utils';
+import { Equal, Hash } from 'effect';
 import { Option } from '../../src/Option.js';
 import { Result } from '../../src/Result.js';
 
@@ -161,6 +163,42 @@ describe('Result', () => {
     it('isFailure', () => {
       assertTrue(Result.fail('err').isFailure());
       assertFalse(Result.succeed(1).isFailure());
+    });
+  });
+
+  describe('Equal', () => {
+    it('Success equals Success with same value', () => {
+      assertTrue(Equal.equals(Result.succeed(1), Result.succeed(1)));
+    });
+
+    it('Success not equal to Success with different value', () => {
+      assertFalse(Equal.equals(Result.succeed(1), Result.succeed(2)));
+    });
+
+    it('Failure equals Failure with same error', () => {
+      assertTrue(Equal.equals(Result.fail('err'), Result.fail('err')));
+    });
+
+    it('Failure not equal to Failure with different error', () => {
+      assertFalse(Equal.equals(Result.fail('a'), Result.fail('b')));
+    });
+
+    it('Success not equal to Failure', () => {
+      assertFalse(Equal.equals(Result.succeed(1), Result.fail(1) as any));
+    });
+
+    it('not equal to non-Result', () => {
+      assertFalse(Equal.equals(Result.succeed(1), 1 as any));
+    });
+  });
+
+  describe('Hash', () => {
+    it('equal Success values have equal hashes', () => {
+      strictEqual(Hash.hash(Result.succeed(1)), Hash.hash(Result.succeed(1)));
+    });
+
+    it('equal Failure values have equal hashes', () => {
+      strictEqual(Hash.hash(Result.fail('err')), Hash.hash(Result.fail('err')));
     });
   });
 
