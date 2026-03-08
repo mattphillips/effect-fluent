@@ -172,7 +172,7 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
 
 // --- Success and Failure classes ---
 
-export class Success<out A, out E> extends ResultBase<A, E> {
+class Success<out A, out E> extends ResultBase<A, E> {
   readonly _tag = 'Success' as const;
   readonly _op = 'Success' as const;
   readonly success: A;
@@ -187,7 +187,7 @@ export class Success<out A, out E> extends ResultBase<A, E> {
   }
 }
 
-export class Failure<out A, out E> extends ResultBase<A, E> {
+class Failure<out A, out E> extends ResultBase<A, E> {
   readonly _tag = 'Failure' as const;
   readonly _op = 'Failure' as const;
   readonly failure: E;
@@ -205,6 +205,14 @@ export class Failure<out A, out E> extends ResultBase<A, E> {
 // --- Public type alias ---
 
 export type Result<A, E = never> = Success<A, E> | Failure<A, E>;
+
+type _Success<A, E> = Success<A, E>;
+type _Failure<A, E> = Failure<A, E>;
+
+export namespace Result {
+  export type Success<A, E = never> = _Success<A, E>;
+  export type Failure<A, E> = _Failure<A, E>;
+}
 
 // --- Static functions ---
 

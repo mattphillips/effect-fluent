@@ -219,7 +219,7 @@ abstract class OptionBase<out A>
 
 // --- Some and None classes ---
 
-export class Some<out A> extends OptionBase<A> {
+class Some<out A> extends OptionBase<A> {
   readonly _tag = 'Some' as const;
   readonly _op = 'Some' as const;
   readonly value: A;
@@ -234,7 +234,7 @@ export class Some<out A> extends OptionBase<A> {
   }
 }
 
-export class None<out A = never> extends OptionBase<A> {
+class None<out A = never> extends OptionBase<A> {
   readonly _tag = 'None' as const;
   readonly _op = 'None' as const;
 
@@ -249,7 +249,15 @@ export class None<out A = never> extends OptionBase<A> {
 
 // --- Public type alias ---
 
+type _Some<A> = Some<A>;
+type _None<A> = None<A>;
+
 export type Option<A> = Some<A> | None<A>;
+
+export namespace Option {
+  export type Some<A> = _Some<A>;
+  export type None<A = never> = _None<A>;
+}
 
 // --- Static functions (merged onto Option via declaration merging) ---
 

@@ -7,7 +7,7 @@ import * as Exit from 'effect/Exit';
 import * as Predicate from 'effect/Predicate';
 import * as assert from 'node:assert';
 import { assert as vassert } from 'vitest';
-import { Option, None, Some, Result, Success, Failure } from 'effect-fluent';
+import { Option, Result } from 'effect-fluent';
 
 // ----------------------------
 // Primitives
@@ -185,7 +185,7 @@ export async function throwsAsync(
  *
  * @since 4.0.0
  */
-export function assertNone<A>(option: Option<A>, ..._: Array<never>): asserts option is None<A> {
+export function assertNone<A>(option: Option<A>, ..._: Array<never>): asserts option is Option.None<A> {
   deepStrictEqual(option, Option.none());
 }
 
@@ -216,7 +216,7 @@ export function assertUndefined<A>(a: A | undefined, ..._: Array<never>): assert
  *
  * @since 4.0.0
  */
-export function assertSome<A>(option: Option<A>, expected: A, ..._: Array<never>): asserts option is Some<A> {
+export function assertSome<A>(option: Option<A>, expected: A, ..._: Array<never>): asserts option is Option.Some<A> {
   deepStrictEqual(option, Option.some(expected));
 }
 
@@ -233,7 +233,7 @@ export function assertSuccess<A, E>(
   result: Result<A, E>,
   expected: A,
   ..._: Array<never>
-): asserts result is Success<A, E> {
+): asserts result is Result.Success<A, E> {
   deepStrictEqual(result, Result.succeed(expected));
 }
 
@@ -246,7 +246,7 @@ export function assertFailure<A, E>(
   result: Result<A, E>,
   expected: E,
   ..._: Array<never>
-): asserts result is Failure<A, E> {
+): asserts result is Result.Failure<A, E> {
   deepStrictEqual(result, Result.fail(expected));
 }
 
