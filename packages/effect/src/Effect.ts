@@ -186,7 +186,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
       readonly mode?: 'default' | 'result' | undefined;
     }
   >(arg: Arg, options?: O): All.Return<Arg, O> {
-    const result = (self: Effect<any, any, any>) => Effect.of(_Effect.result(self.asEffect())).map((r) => Result.of(r));
+    const result = (self: Effect<any, any, any>) => self.result;
 
     if (isIterable(arg)) {
       return options?.mode === 'result'
@@ -365,6 +365,14 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
 
   get exit(): Effect<Exit.Exit<A, E>, never, R> {
     return new Effect(_Effect.exit(this._effect));
+  }
+
+  get result(): Effect<Result<A, E>, never, R> {
+    return new Effect(_Effect.result(this._effect)).map(Result.of);
+  }
+
+  get option(): Effect<Option<A>, never, R> {
+    return new Effect(_Effect.option(this._effect)).map(Option.of);
   }
 
   with<B, E2, R2>(f: (effect: _Effect.Effect<A, E, R>) => _Effect.Effect<B, E2, R2>): Effect<B, E2, R2> {

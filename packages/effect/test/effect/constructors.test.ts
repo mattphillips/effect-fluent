@@ -207,8 +207,8 @@ describe('Effect', () => {
     describe('never', () => {
       it.live('never does not complete', () =>
         Effect.gen(function* () {
-          const result = yield* Effect.of(_Effect.option(_Effect.timeout(Effect.never.asEffect(), '50 millis')));
-          assertNone(Option.of(result));
+          const result = yield* Effect.never.with(_Effect.timeout('50 millis')).option;
+          assertNone(result);
         })
       );
     });
