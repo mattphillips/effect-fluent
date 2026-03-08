@@ -72,21 +72,21 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
   // --- Instance methods: Mapping ---
 
   map<B>(f: (a: A) => B): Result<B, E> {
-    return of(_Result.map(this.result, f));
+    return wrap(_Result.map(this.result, f));
   }
 
   mapError<E2>(f: (e: E) => E2): Result<A, E2> {
-    return of(_Result.mapError(this.result, f));
+    return wrap(_Result.mapError(this.result, f));
   }
 
   mapBoth<E2, A2>(options: { readonly onFailure: (e: E) => E2; readonly onSuccess: (a: A) => A2 }): Result<A2, E2> {
-    return of(_Result.mapBoth(this.result, options));
+    return wrap(_Result.mapBoth(this.result, options));
   }
 
   // --- Instance methods: Sequencing ---
 
   flatMap<B, E2>(f: (a: A) => Result<B, E2>): Result<B, E | E2> {
-    return of(_Result.flatMap(this.result, (a) => f(a).asResult()));
+    return wrap(_Result.flatMap(this.result, (a) => f(a).asResult()));
   }
 
   andThen<B, E2>(f: (a: A) => Result<B, E2>): Result<B, E | E2>;
@@ -104,7 +104,7 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
   }
 
   tap(f: (a: A) => void): Result<A, E> {
-    return of(_Result.tap(this.result, f));
+    return wrap(_Result.tap(this.result, f));
   }
 
   // --- Instance methods: Getters ---
@@ -136,17 +136,17 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
   // --- Instance methods: Error handling ---
 
   orElse<A2, E2>(that: (err: E) => Result<A2, E2>): Result<A | A2, E2> {
-    return of(_Result.orElse(this.result, (e) => that(e).asResult()));
+    return wrap(_Result.orElse(this.result, (e) => that(e).asResult()));
   }
 
   get flip(): Result<E, A> {
-    return of(_Result.flip(this.result));
+    return wrap(_Result.flip(this.result));
   }
 
   filterOrFail<B extends A, E2>(refinement: Refinement<A, B>, orFailWith: (a: A) => E2): Result<B, E | E2>;
   filterOrFail<E2>(predicate: Predicate<A>, orFailWith: (a: A) => E2): Result<A, E | E2>;
   filterOrFail(predicate: Predicate<A>, orFailWith: (a: A) => unknown): Result<A, any> {
-    return of(_Result.filterOrFail(this.result, predicate, orFailWith));
+    return wrap(_Result.filterOrFail(this.result, predicate, orFailWith));
   }
 
   // --- Instance methods: Conversions to fluent Option ---
@@ -162,7 +162,11 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
   // --- Instance methods: Do notation ---
 
   bindTo<N extends string>(name: N): Result<{ [K in N]: A }, E> {
-    return of(_Result.bindTo(this.result, name));
+    return wrap(_Result.bindTo(this.result, name));
+  }
+
+  with<B, E2>(f: (result: _Result.Result<A, E>) => _Result.Result<B, E2>): Result<B, E | E2> {
+    return wrap(f(this.result));
   }
 }
 
@@ -212,7 +216,7 @@ const void_: Result<void> = succeed(undefined as void);
 
 const failVoid: Result<never, void> = fail(undefined as void);
 
-const of = <A, E>(r: _Result.Result<A, E>): Result<A, E> => {
+const wrap = <A, E>(r: _Result.Result<A, E>): Result<A, E> => {
   return _Result.isSuccess(r) ? new Success(r.success) : new Failure(r.failure);
 };
 
@@ -225,9 +229,9 @@ const try_: {
   evaluate: LazyArg<A> | { readonly try: LazyArg<A>; readonly catch: (error: unknown) => E }
 ): Result<A, E> | Result<A, unknown> => {
   if (isFunction(evaluate)) {
-    return of(_Result.try(evaluate));
+    return wrap(_Result.try(evaluate));
   } else {
-    return of(_Result.try(evaluate));
+    return wrap(_Result.try(evaluate));
   }
 };
 
@@ -235,14 +239,14 @@ const fromNullishOr: {
   <A, E>(onNullish: (a: A) => E): (self: A) => Result<NonNullable<A>, E>;
   <A, E>(self: A, onNullish: (a: A) => E): Result<NonNullable<A>, E>;
 } = dual(2, <A, E>(self: A, onNullish: (a: A) => E): Result<NonNullable<A>, E> => {
-  return of(_Result.fromNullishOr(self, onNullish));
+  return wrap(_Result.fromNullishOr(self, onNullish));
 });
 
 const fromOption: {
   <E>(onNone: () => E): <A>(self: Option<A>) => Result<A, E>;
   <A, E>(self: Option<A>, onNone: () => E): Result<A, E>;
 } = dual(2, <A, E>(self: Option<A>, onNone: () => E): Result<A, E> => {
-  return of(_Result.fromOption(self.asOption(), onNone));
+  return wrap(_Result.fromOption(self.asOption(), onNone));
 });
 
 const liftPredicate: {
@@ -251,7 +255,7 @@ const liftPredicate: {
   <A, E, B extends A>(self: A, refinement: Refinement<A, B>, orFailWith: (a: A) => E): Result<B, E>;
   <B extends A, E, A = B>(self: B, predicate: Predicate<A>, orFailWith: (a: A) => E): Result<B, E>;
 } = dual(3, <A, E>(a: A, predicate: Predicate<A>, orFailWith: (a: A) => E): Result<A, E> => {
-  return of(_Result.liftPredicate(a, predicate, orFailWith));
+  return wrap(_Result.liftPredicate(a, predicate, orFailWith));
 });
 
 const all: {
@@ -320,7 +324,7 @@ const bind: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Result<B, L2>
   ): Result<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }, L1 | L2> => {
-    return of(_Result.bind(self.asResult(), name, (a: A) => f(a).asResult()));
+    return wrap(_Result.bind(self.asResult(), name, (a: A) => f(a).asResult()));
   }
 );
 
@@ -341,7 +345,7 @@ const let_: {
     name: Exclude<N, keyof R>,
     f: (r: NoInfer<R>) => B
   ): Result<{ [K in N | keyof R]: K extends keyof R ? R[K] : B }, L1 | L2> => {
-    return of(_Result.let(self.asResult(), name, (r: R) => f(r)));
+    return wrap(_Result.let(self.asResult(), name, (r: R) => f(r)));
   }
 );
 
@@ -363,14 +367,14 @@ const succeedNone: Result<Option<never>> = succeed(Option.none());
 const succeedSome = <A, E = never>(a: A): Result<Option<A>, E> => new Success(Option.some(a));
 
 const transposeOption = <A = never, E = never>(self: Option<Result<A, E>>): Result<Option<A>, E> => {
-  return of(_Result.transposeOption(self.map((r) => r.asResult()).asOption())).map(Option.of);
+  return wrap(_Result.transposeOption(self.map((r) => r.asResult()).asOption())).map(Option.wrap);
 };
 
 const transposeMapOption: {
   <A, B, E = never>(f: (self: A) => Result<B, E>): (self: Option<A>) => Result<Option<B>, E>;
   <A, B, E = never>(self: Option<A>, f: (self: A) => Result<B, E>): Result<Option<B>, E>;
 } = dual(2, <A, B, E = never>(self: Option<A>, f: (self: A) => Result<B, E>): Result<Option<B>, E> => {
-  return of(_Result.transposeMapOption(self.asOption(), (a) => f(a).asResult())).map(Option.of);
+  return wrap(_Result.transposeMapOption(self.asOption(), (a) => f(a).asResult())).map(Option.wrap);
 });
 
 export const Result = {
@@ -379,7 +383,7 @@ export const Result = {
   void: void_,
   failVoid,
   try: try_,
-  of,
+  wrap,
   is,
   fromNullishOr,
   fromOption,

@@ -47,7 +47,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   static make<A>(value: A): Effect<Ref<A>> {
-    return Effect.of(_Ref.make(value)).map((ref) => new Ref(ref));
+    return Effect.wrap(_Ref.make(value)).map((ref) => new Ref(ref));
   }
 
   /**
@@ -95,7 +95,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   get get(): Effect<A> {
-    return Effect.of(_Ref.get(this._ref));
+    return Effect.wrap(_Ref.get(this._ref));
   }
 
   /**
@@ -114,7 +114,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   set(value: A): Effect<void> {
-    return Effect.of(_Ref.set(this._ref, value));
+    return Effect.wrap(_Ref.set(this._ref, value));
   }
 
   /**
@@ -137,7 +137,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   getAndSet(value: A): Effect<A> {
-    return Effect.of(_Ref.getAndSet(this._ref, value));
+    return Effect.wrap(_Ref.getAndSet(this._ref, value));
   }
 
   /**
@@ -160,7 +160,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   getAndUpdate(f: (a: A) => A): Effect<A> {
-    return Effect.of(_Ref.getAndUpdate(this._ref, f));
+    return Effect.wrap(_Ref.getAndUpdate(this._ref, f));
   }
 
   /**
@@ -188,7 +188,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   getAndUpdateSome(pf: (a: A) => Option<A>): Effect<A> {
-    return Effect.of(_Ref.getAndUpdateSome(this._ref, pf));
+    return Effect.wrap(_Ref.getAndUpdateSome(this._ref, pf));
   }
 
   /**
@@ -206,7 +206,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   setAndGet(value: A): Effect<A> {
-    return Effect.of(_Ref.setAndGet(this._ref, value));
+    return Effect.wrap(_Ref.setAndGet(this._ref, value));
   }
 
   /**
@@ -226,7 +226,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   update(f: (a: A) => A): Effect<void> {
-    return Effect.of(_Ref.update(this._ref, f));
+    return Effect.wrap(_Ref.update(this._ref, f));
   }
 
   /**
@@ -244,7 +244,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   updateAndGet(f: (a: A) => A): Effect<A> {
-    return Effect.of(_Ref.updateAndGet(this._ref, f));
+    return Effect.wrap(_Ref.updateAndGet(this._ref, f));
   }
 
   /**
@@ -278,7 +278,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   updateSome(f: (a: A) => Option<A>): Effect<void> {
-    return Effect.of(_Ref.updateSome(this._ref, f));
+    return Effect.wrap(_Ref.updateSome(this._ref, f));
   }
 
   /**
@@ -303,7 +303,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   updateSomeAndGet(pf: (a: A) => Option<A>): Effect<A> {
-    return Effect.of(_Ref.updateSomeAndGet(this._ref, pf));
+    return Effect.wrap(_Ref.updateSomeAndGet(this._ref, pf));
   }
 
   /**
@@ -330,7 +330,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   modify<B>(f: (a: A) => readonly [B, A]): Effect<B> {
-    return Effect.of(_Ref.modify(this._ref, f));
+    return Effect.wrap(_Ref.modify(this._ref, f));
   }
 
   /**
@@ -361,7 +361,7 @@ export class Ref<in out A> extends Inspectable {
    * ```
    */
   modifySome<B>(pf: (a: A) => readonly [B, Option<A>]): Effect<B> {
-    return Effect.of(_Ref.modifySome(this._ref, pf));
+    return Effect.wrap(_Ref.modifySome(this._ref, pf));
   }
 
   /**

@@ -75,21 +75,21 @@ abstract class OptionBase<out A>
   // --- Instance methods: Mapping ---
 
   map<B>(f: (a: A) => B): Option<B> {
-    return of(_Option.map(this.option, f));
+    return wrap(_Option.map(this.option, f));
   }
 
   as<B>(value: B): Option<B> {
-    return of(_Option.as(this.option, value));
+    return wrap(_Option.as(this.option, value));
   }
 
   get asVoid(): Option<void> {
-    return of(_Option.asVoid(this.option));
+    return wrap(_Option.asVoid(this.option));
   }
 
   // --- Instance methods: Sequencing ---
 
   flatMap<B>(f: (a: A) => Option<B>): Option<B> {
-    return of(_Option.flatMap(this.option, (a) => f(a).option));
+    return wrap(_Option.flatMap(this.option, (a) => f(a).option));
   }
 
   andThen<B>(f: (a: A) => Option<B>): Option<B>;
@@ -107,11 +107,11 @@ abstract class OptionBase<out A>
   }
 
   tap<X>(f: (a: A) => Option<X>): Option<A> {
-    return of(_Option.tap(this.option, (a) => f(a).option));
+    return wrap(_Option.tap(this.option, (a) => f(a).option));
   }
 
   flatMapNullishOr<B>(f: (a: A) => B): Option<NonNullable<B>> {
-    return of(_Option.flatMapNullishOr(this.option, f));
+    return wrap(_Option.flatMapNullishOr(this.option, f));
   }
 
   // --- Instance methods: Getters ---
@@ -139,33 +139,33 @@ abstract class OptionBase<out A>
   // --- Instance methods: Fallbacks ---
 
   orElse<B>(that: LazyArg<Option<B>>): Option<A | B> {
-    return of(_Option.orElse(this.option, () => that().option));
+    return wrap(_Option.orElse(this.option, () => that().option));
   }
 
   orElseSome<B>(value: LazyArg<B>): Option<A | B> {
-    return of(_Option.orElseSome(this.option, value));
+    return wrap(_Option.orElseSome(this.option, value));
   }
 
   // --- Instance methods: Zipping ---
 
   zipWith<B, C>(that: Option<B>, f: (a: A, b: B) => C): Option<C> {
-    return of(_Option.zipWith(this.option, that.option, f));
+    return wrap(_Option.zipWith(this.option, that.option, f));
   }
 
   zipRight<B>(that: Option<B>): Option<B> {
-    return of(_Option.zipRight(this.option, that.option));
+    return wrap(_Option.zipRight(this.option, that.option));
   }
 
   zipLeft<B>(that: Option<B>): Option<A> {
-    return of(_Option.zipLeft(this.option, that.option));
+    return wrap(_Option.zipLeft(this.option, that.option));
   }
 
   product<B>(that: Option<B>): Option<[A, B]> {
-    return of(_Option.product(this.option, that.option));
+    return wrap(_Option.product(this.option, that.option));
   }
 
   productMany(others: Iterable<Option<A>>): Option<[A, ...Array<A>]> {
-    return of(
+    return wrap(
       _Option.productMany(
         this.option,
         (function* (iter: Iterable<Option<A>>) {
@@ -180,16 +180,16 @@ abstract class OptionBase<out A>
   filter<B extends A>(refinement: Refinement<A, B>): Option<B>;
   filter(predicate: Predicate<A>): Option<A>;
   filter(predicate: Predicate<A>): Option<A> {
-    return of(_Option.filter(this.option, predicate));
+    return wrap(_Option.filter(this.option, predicate));
   }
 
   filterMap<B, X>(f: Filter<A, B, X>): Option<B> {
-    return of(_Option.filterMap(this.option, f));
+    return wrap(_Option.filterMap(this.option, f));
   }
 
   partitionMap<B, C>(f: (a: A) => Result.Result<C, B>): [left: Option<B>, right: Option<C>] {
     const [left, right] = _Option.partitionMap(this.option, f);
-    return [of(left), of(right)];
+    return [wrap(left), wrap(right)];
   }
 
   // --- Instance methods: Conversions/checks ---
@@ -209,7 +209,11 @@ abstract class OptionBase<out A>
   // --- Instance methods: Do notation ---
 
   bindTo<N extends string>(name: N): Option<{ [K in N]: A }> {
-    return of(_Option.bindTo(this.option, name));
+    return wrap(_Option.bindTo(this.option, name));
+  }
+
+  with<B>(f: (option: _Option.Option<A>) => _Option.Option<B>): Option<B> {
+    return wrap(f(this.option));
   }
 }
 
@@ -253,20 +257,21 @@ const some = <A>(value: A): Option<A> => new Some(value);
 
 const none = <A = never>(): Option<A> => new None<A>();
 
-const of = <A>(o: _Option.Option<A>): Option<A> => {
+const wrap = <A>(o: _Option.Option<A>): Option<A> => {
   return _Option.isSome(o) ? new Some(o.value) : new None<A>();
 };
 
 const is = (u: unknown): u is Option<unknown> => hasProperty(u, OptionTypeId);
 
-const fromNullishOr = <A>(value: A): Option<NonNullable<A>> => of(_Option.fromNullishOr(value));
+const fromNullishOr = <A>(value: A): Option<NonNullable<A>> => wrap(_Option.fromNullishOr(value));
 
 const fromUndefinedOr = <A>(value: A): Option<Exclude<A, undefined>> =>
-  of(_Option.fromUndefinedOr(value)) as Option<Exclude<A, undefined>>;
+  wrap(_Option.fromUndefinedOr(value)) as Option<Exclude<A, undefined>>;
 
-const fromNullOr = <A>(value: A): Option<Exclude<A, null>> => of(_Option.fromNullOr(value)) as Option<Exclude<A, null>>;
+const fromNullOr = <A>(value: A): Option<Exclude<A, null>> =>
+  wrap(_Option.fromNullOr(value)) as Option<Exclude<A, null>>;
 
-const fromIterable = <A>(collection: Iterable<A>): Option<A> => of(_Option.fromIterable(collection));
+const fromIterable = <A>(collection: Iterable<A>): Option<A> => wrap(_Option.fromIterable(collection));
 
 const getSuccess = <A, E>(self: Result.Result<A, E>): Option<A> =>
   Result.isSuccess(self) ? new Some(self.success) : new None<A>();
@@ -343,7 +348,7 @@ const bind: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Option<B>
   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
-    return of(_Option.bind(self.asOption(), name, (a: A) => f(a).asOption()));
+    return wrap(_Option.bind(self.asOption(), name, (a: A) => f(a).asOption()));
   }
 );
 
@@ -364,7 +369,7 @@ const let_: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Option<B>
   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
-    return of(_Option.let(self.asOption(), name, (a: A) => f(a))) as any;
+    return wrap(_Option.let(self.asOption(), name, (a: A) => f(a))) as any;
   }
 );
 
@@ -374,11 +379,11 @@ const liftPredicate: {
   <A, B extends A>(self: A, refinement: Refinement<A, B>): Option<B>;
   <B extends A, A = B>(self: B, predicate: Predicate<A>): Option<B>;
 } = dual(2, <B extends A, A = B>(b: B, predicate: Predicate<A>): Option<B> => {
-  return of(_Option.liftPredicate(b, predicate));
+  return wrap(_Option.liftPredicate(b, predicate));
 });
 
 const liftThrowable = <A extends ReadonlyArray<unknown>, B>(f: (...a: A) => B): ((...a: A) => Option<B>) => {
-  return (...a) => of(_Option.liftThrowable(f)(...a));
+  return (...a) => wrap(_Option.liftThrowable(f)(...a));
 };
 
 const liftNullishOr = <A extends ReadonlyArray<unknown>, B>(
@@ -432,14 +437,14 @@ const lift2 = <A, B, C>(
   (self: Option<A>, that: Option<B>): Option<C>;
 } => {
   return dual(2, (self: Option<A>, that: Option<B>): Option<C> => {
-    return of(_Option.lift2(f)(self.asOption(), that.asOption()));
+    return wrap(_Option.lift2(f)(self.asOption(), that.asOption()));
   });
 };
 
 export const Option = {
   some,
   none,
-  of,
+  wrap,
   is,
   fromNullishOr,
   fromUndefinedOr,

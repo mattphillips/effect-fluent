@@ -16,7 +16,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return hasProperty(u, EffectTypeId);
   }
 
-  static of<A, E = never, R = never>(effect: _Effect.Effect<A, E, R>): Effect<A, E, R> {
+  static wrap<A, E = never, R = never>(effect: _Effect.Effect<A, E, R>): Effect<A, E, R> {
     return new Effect(effect);
   }
 
@@ -368,11 +368,11 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
   }
 
   get result(): Effect<Result<A, E>, never, R> {
-    return new Effect(_Effect.result(this._effect)).map(Result.of);
+    return new Effect(_Effect.result(this._effect)).map(Result.wrap);
   }
 
   get option(): Effect<Option<A>, never, R> {
-    return new Effect(_Effect.option(this._effect)).map(Option.of);
+    return new Effect(_Effect.option(this._effect)).map(Option.wrap);
   }
 
   with<B, E2, R2>(f: (effect: _Effect.Effect<A, E, R>) => _Effect.Effect<B, E2, R2>): Effect<B, E2, R2> {

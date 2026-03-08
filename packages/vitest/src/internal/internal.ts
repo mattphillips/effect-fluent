@@ -209,7 +209,7 @@ export const layer =
       _Effect.orDie,
       _Effect.cached,
       _Effect.runSync,
-      Effect.of
+      Effect.wrap
     );
 
     const makeIt = (it: V.TestAPI): Vitest.Vitest.MethodsNonLive<R> =>
@@ -218,7 +218,7 @@ export const layer =
           (effect) =>
             contextEffect.flatMap((context) =>
               // TODO: replace with fluent provide
-              Effect.scoped(effect).asEffect().pipe(_Effect.provide(context), Effect.of)
+              Effect.scoped(effect).asEffect().pipe(_Effect.provide(context), Effect.wrap)
             ),
           it
         ),
@@ -241,7 +241,7 @@ export const layer =
       );
       V.afterAll(
         // TODO: replace with fluent scope
-        () => runPromise(Effect.of(Scope.close(scope, Exit.void))),
+        () => runPromise(Effect.wrap(Scope.close(scope, Exit.void))),
         options?.timeout ? Duration.toMillis(Duration.fromInputUnsafe(options.timeout)) : undefined
       );
       return args[0](makeIt(V.it));
@@ -254,7 +254,7 @@ export const layer =
       );
       V.afterAll(
         // TODO: replace with fluent scope
-        () => runPromise(Effect.of(Scope.close(scope, Exit.void))),
+        () => runPromise(Effect.wrap(Scope.close(scope, Exit.void))),
         options?.timeout ? Duration.toMillis(Duration.fromInputUnsafe(options.timeout)) : undefined
       );
       return args[1](makeIt(V.it));
@@ -281,7 +281,7 @@ export const flakyTest = <A, E, R>(
       )
     ),
     _Effect.orDie,
-    Effect.of
+    Effect.wrap
   );
 
 /** @internal */
@@ -289,7 +289,7 @@ export const makeMethods = (it: V.TestAPI): Vitest.Vitest.Methods =>
   Object.assign(it, {
     effect: makeTester<Scope.Scope>(
       // TODO: replace with fluent effect
-      flow(Effect.scoped, (a) => a.asEffect(), _Effect.provide(TestEnv), Effect.of),
+      flow(Effect.scoped, (a) => a.asEffect(), _Effect.provide(TestEnv), Effect.wrap),
       it
     ),
     live: makeTester<Scope.Scope>(Effect.scoped, it),

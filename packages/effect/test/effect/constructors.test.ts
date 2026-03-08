@@ -156,19 +156,10 @@ describe('Effect', () => {
       });
     });
 
-    describe('other', () => {
-      it.effect('of lifts an effect to an effect', () => {
-        return Effect.gen(function* () {
-          const result = yield* Effect.of(_Effect.succeed(42));
-          strictEqual(result, 42);
-        });
-      });
-
-      it.effect('suspend lifts a lazy effect to an effect', () => {
-        return Effect.gen(function* () {
-          const result = yield* Effect.suspend(() => Effect.succeed(42));
-          strictEqual(result, 42);
-        });
+    it.effect('suspend lifts a lazy effect to an effect', () => {
+      return Effect.gen(function* () {
+        const result = yield* Effect.suspend(() => Effect.succeed(42));
+        strictEqual(result, 42);
       });
     });
 

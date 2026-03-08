@@ -53,7 +53,7 @@ describe('Effect', () => {
         .pipe(
           // TODO: Replace `provideService` with a more fluent version
           _Effect.provideService(Database, { query: () => _Effect.succeed([1]) }),
-          Effect.of
+          Effect.wrap
         );
     });
 
@@ -75,7 +75,7 @@ describe('Effect', () => {
         .pipe(
           // TODO: Replace `provideService` with a more fluent version
           _Effect.provideService(Database, { query: () => Effect.succeed([1]) }),
-          Effect.of
+          Effect.wrap
         );
     });
 
