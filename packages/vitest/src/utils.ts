@@ -5,10 +5,9 @@ import type * as Cause from 'effect/Cause';
 import * as Equal from 'effect/Equal';
 import * as Exit from 'effect/Exit';
 import * as Predicate from 'effect/Predicate';
-import * as Result from 'effect/Result';
 import * as assert from 'node:assert';
 import { assert as vassert } from 'vitest';
-import { Option, None, Some } from 'effect-fluent';
+import { Option, None, Some, Result, Success, Failure } from 'effect-fluent';
 
 // ----------------------------
 // Primitives
@@ -231,10 +230,10 @@ export function assertSome<A>(option: Option<A>, expected: A, ..._: Array<never>
  * @since 4.0.0
  */
 export function assertSuccess<A, E>(
-  result: Result.Result<A, E>,
+  result: Result<A, E>,
   expected: A,
   ..._: Array<never>
-): asserts result is Result.Success<A, never> {
+): asserts result is Success<A, E> {
   deepStrictEqual(result, Result.succeed(expected));
 }
 
@@ -244,10 +243,10 @@ export function assertSuccess<A, E>(
  * @since 4.0.0
  */
 export function assertFailure<A, E>(
-  result: Result.Result<A, E>,
+  result: Result<A, E>,
   expected: E,
   ..._: Array<never>
-): asserts result is Result.Failure<never, E> {
+): asserts result is Failure<A, E> {
   deepStrictEqual(result, Result.fail(expected));
 }
 

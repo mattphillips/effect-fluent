@@ -3,6 +3,7 @@ import { deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
 import { Effect as _Effect, Cause } from 'effect';
 import { Effect } from '../../src/Effect.js';
 import { Option } from '../../src/Option.js';
+import { Result } from 'effect-fluent/Result';
 
 describe('Effect', () => {
   describe('constructors', () => {
@@ -182,6 +183,22 @@ describe('Effect', () => {
         return Effect.gen(function* () {
           const result = yield* Effect.fromOption(Option.none()).flip;
           deepStrictEqual(result, new Cause.NoSuchElementError());
+        });
+      });
+    });
+
+    describe('fromResult', () => {
+      it.effect('lifts result success to an effect', () => {
+        return Effect.gen(function* () {
+          const result = yield* Effect.fromResult(Result.succeed(42));
+          strictEqual(result, 42);
+        });
+      });
+
+      it.effect('lifts result failure to an effect', () => {
+        return Effect.gen(function* () {
+          const result = yield* Effect.fromResult(Result.fail('error')).flip;
+          deepStrictEqual(result, 'error');
         });
       });
     });

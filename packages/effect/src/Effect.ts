@@ -4,6 +4,7 @@ import type { LazyArg } from 'effect/Function';
 import { hasProperty, isFunction } from 'effect/Predicate';
 import type { ExtractTag, Tags } from 'effect/Types';
 import { Option } from './Option.js';
+import type { Result as FluentResult } from './Result.js';
 
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
@@ -90,6 +91,10 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
 
   static fromOption<A>(option: Option<A>): Effect<A, Cause.NoSuchElementError> {
     return new Effect(_Effect.fromOption(option.asOption()));
+  }
+
+  static fromResult<A, E>(result: FluentResult<A, E>): Effect<A, E> {
+    return new Effect(result.asEffect());
   }
 
   static gen<Eff extends _Effect.Yieldable<any, any, any, any>, AEff>(
