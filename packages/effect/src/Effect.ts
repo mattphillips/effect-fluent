@@ -1,10 +1,10 @@
-import { Effect as _Effect, Cause, Exit, Scheduler, Scope } from 'effect';
+import { Array as Arr, Effect as _Effect, Cause, Duration, Exit, Scheduler, Scope } from 'effect';
 import type { Filter } from 'effect/Filter';
-import type { LazyArg } from 'effect/Function';
-import { hasProperty, isFunction } from 'effect/Predicate';
-import type { ExtractTag, Tags } from 'effect/Types';
+import { dual, identity, type LazyArg } from 'effect/Function';
+import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
+import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
 import { Option } from './Option.js';
-import type { Result as FluentResult } from './Result.js';
+import { Result } from './Result.js';
 
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
@@ -93,7 +93,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return new Effect(_Effect.fromOption(option.asOption()));
   }
 
-  static fromResult<A, E>(result: FluentResult<A, E>): Effect<A, E> {
+  static fromResult<A, E>(result: Result<A, E>): Effect<A, E> {
     return new Effect(result.asEffect());
   }
 
@@ -152,6 +152,110 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
 
   static scoped<A, E, R>(self: Effect<A, E, R>): Effect<A, E, Exclude<R, Scope.Scope>> {
     return new Effect(_Effect.scoped(self.asEffect()));
+  }
+
+  static get never(): Effect<never> {
+    return new Effect(_Effect.never);
+  }
+
+  static get succeedNone(): Effect<Option<never>> {
+    return Effect.succeed(Option.none());
+  }
+
+  static succeedSome<A>(value: A): Effect<Option<A>> {
+    return Effect.succeed(Option.some(value));
+  }
+
+  static sleep(duration: Duration.Input): Effect<void> {
+    return new Effect(_Effect.sleep(duration));
+  }
+
+  static get yieldNow(): Effect<void> {
+    return new Effect(_Effect.yieldNow);
+  }
+
+  static get interrupt(): Effect<never> {
+    return new Effect(_Effect.interrupt);
+  }
+
+  static all<
+    const Arg extends Iterable<Effect<any, any, any>> | Record<string, Effect<any, any, any>>,
+    O extends {
+      readonly concurrency?: Concurrency | undefined;
+      readonly discard?: boolean | undefined;
+      readonly mode?: 'default' | 'result' | undefined;
+    }
+  >(arg: Arg, options?: O): All.Return<Arg, O> {
+    const result = (self: Effect<any, any, any>) => Effect.of(_Effect.result(self.asEffect())).map((r) => Result.of(r));
+
+    if (isIterable(arg)) {
+      return options?.mode === 'result'
+        ? (Effect.forEach as any)(arg, result, options)
+        : (Effect.forEach as any)(arg, identity, options);
+    } else if (options?.discard) {
+      return options.mode === 'result'
+        ? (Effect.forEach as any)(Object.values(arg), result, options)
+        : (Effect.forEach as any)(Object.values(arg), identity, options);
+    }
+
+    return Effect.suspend(() => {
+      const out: Record<string, unknown> = {};
+
+      return Effect.forEach(
+        Object.entries(arg),
+        ([key, effect]) => {
+          return (options?.mode === 'result' ? result(effect) : effect).map((value) => {
+            out[key] = value;
+          });
+        },
+        {
+          discard: true,
+          concurrency: options?.concurrency
+        }
+      ).as(out);
+    }) as any;
+  }
+
+  static forEach: {
+    <B, E, R, S extends Iterable<any>, const Discard extends boolean = false>(
+      f: (a: Arr.ReadonlyArray.Infer<S>, i: number) => Effect<B, E, R>,
+      options?:
+        | {
+            readonly concurrency?: Concurrency | undefined;
+            readonly discard?: Discard | undefined;
+          }
+        | undefined
+    ): (self: S) => Effect<Discard extends false ? Arr.ReadonlyArray.With<S, B> : void, E, R>;
+    <B, E, R, S extends Iterable<any>, const Discard extends boolean = false>(
+      self: S,
+      f: (a: Arr.ReadonlyArray.Infer<S>, i: number) => Effect<B, E, R>,
+      options?:
+        | {
+            readonly concurrency?: Concurrency | undefined;
+            readonly discard?: Discard | undefined;
+          }
+        | undefined
+    ): Effect<Discard extends false ? Arr.ReadonlyArray.With<S, B> : void, E, R>;
+  } = dual(
+    (args) => typeof args[1] === 'function',
+    <A, B, E, R>(
+      iterable: Iterable<A>,
+      f: (a: A, index: number) => Effect<B, E, R>,
+      options?: {
+        readonly concurrency?: Concurrency | undefined;
+        readonly discard?: boolean | undefined;
+      }
+    ): Effect<any, E, R> => {
+      return new Effect(_Effect.forEach(iterable, (a, i) => f(a, i).asEffect(), options));
+    }
+  );
+
+  static partition<A, B, E, R>(
+    elements: Iterable<A>,
+    f: (a: A, i: number) => Effect<B, E, R>,
+    options?: { readonly concurrency?: Concurrency }
+  ): Effect<[excluded: Array<E>, satisfying: Array<B>], never, R> {
+    return new Effect(_Effect.partition(elements, (a, i) => f(a, i).asEffect(), options));
   }
 
   private readonly _effect: _Effect.Effect<A, E, R>;
@@ -262,4 +366,182 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
   get exit(): Effect<Exit.Exit<A, E>, never, R> {
     return new Effect(_Effect.exit(this._effect));
   }
+}
+
+export type EffectAny = Effect<any, any, any>;
+
+export namespace All {
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import { Data, Effect } from "effect"
+   *
+   * class OopsError extends Data.TaggedError("OopsError")<{}> {}
+   *
+   * // EffectAny represents an Effect with any type parameters
+   * const effects: Array<Effect.All.EffectAny> = [
+   *   Effect.succeed(42),
+   *   Effect.succeed("hello"),
+   *   Effect.fail(new OopsError())
+   * ]
+   * ```
+   */
+  export type EffectAny = Effect<any, any, any>;
+
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import type { Effect } from "effect"
+   *
+   * // ReturnIterable computes the return type for Effect.all with iterables
+   * type EffectArray = Array<Effect.Effect<number, string, never>>
+   * type Result = Effect.All.ReturnIterable<EffectArray, false>
+   * // Result: Effect<Array<number>, string, never>
+   * ```
+   */
+  export type ReturnIterable<T extends Iterable<EffectAny>, Discard extends boolean, Mode extends boolean = false> = [
+    T
+  ] extends [Iterable<Effect<infer A, infer E, infer R>>]
+    ? Effect<
+        Discard extends true ? void : Array<Mode extends true ? Result<A, E> : A>,
+        Mode extends true ? never : E,
+        R
+      >
+    : never;
+
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import type { Effect } from "effect"
+   *
+   * // ReturnTuple computes the return type for Effect.all with tuples
+   * type EffectTuple = [
+   *   Effect.Effect<string, Error, never>,
+   *   Effect.Effect<number, Error, never>
+   * ]
+   * type Result = Effect.All.ReturnTuple<EffectTuple, false>
+   * // Result: Effect<[string, number], Error, never>
+   * ```
+   */
+  export type ReturnTuple<T extends ReadonlyArray<unknown>, Discard extends boolean, Mode extends boolean = false> =
+    Effect<
+      Discard extends true
+        ? void
+        : T[number] extends never
+          ? []
+          : {
+              -readonly [K in keyof T]: T[K] extends Effect<infer _A, infer _E, infer _R>
+                ? Mode extends true
+                  ? Result<_A, _E>
+                  : _A
+                : never;
+            },
+      Mode extends true
+        ? never
+        : T[number] extends never
+          ? never
+          : T[number] extends Effect<infer _A, infer _E, infer _R>
+            ? _E
+            : never,
+      T[number] extends never ? never : T[number] extends Effect<infer _A, infer _E, infer _R> ? _R : never
+    > extends infer X
+      ? X
+      : never;
+
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import type { Effect } from "effect"
+   *
+   * // ReturnObject computes the return type for Effect.all with objects
+   * type EffectRecord = {
+   *   a: Effect.Effect<string, Error, never>
+   *   b: Effect.Effect<number, Error, never>
+   * }
+   * type Result = Effect.All.ReturnObject<EffectRecord, false>
+   * // Result: Effect<{ a: string, b: number }, Error, never>
+   * ```
+   */
+  export type ReturnObject<T, Discard extends boolean, Mode extends boolean = false> = [T] extends [
+    Record<string, EffectAny>
+  ]
+    ? Effect<
+        Discard extends true
+          ? void
+          : {
+              -readonly [K in keyof T]: [T[K]] extends [Effect<infer _A, infer _E, infer _R>]
+                ? Mode extends true
+                  ? Result<_A, _E>
+                  : _A
+                : never;
+            },
+        Mode extends true
+          ? never
+          : keyof T extends never
+            ? never
+            : T[keyof T] extends Effect<infer _A, infer _E, infer _R>
+              ? _E
+              : never,
+        keyof T extends never ? never : T[keyof T] extends Effect<infer _A, infer _E, infer _R> ? _R : never
+      >
+    : never;
+
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import type { Effect } from "effect"
+   *
+   * // IsDiscard checks if options have discard flag set to true
+   * type DiscardOptions = { discard: true }
+   * type NoDiscardOptions = { discard: false }
+   * type WithDiscard = Effect.All.IsDiscard<DiscardOptions> // true
+   * type WithoutDiscard = Effect.All.IsDiscard<NoDiscardOptions> // false
+   * ```
+   */
+  export type IsDiscard<A> = [Extract<A, { readonly discard: true }>] extends [never] ? false : true;
+
+  /**
+   * @since 4.0.0
+   * @category Models
+   */
+  export type IsResult<A> = [Extract<A, { readonly mode: 'result' }>] extends [never] ? false : true;
+
+  /**
+   * @since 2.0.0
+   * @category Models
+   * @example
+   * ```ts
+   * import type { Effect } from "effect"
+   *
+   * // Return determines the result type based on input and options
+   * type EffectArray = Array<Effect.Effect<number, string, never>>
+   * type Options = { discard: false }
+   * type Result = Effect.All.Return<EffectArray, Options>
+   * // Result: Effect<Array<number>, string, never>
+   * ```
+   */
+  export type Return<
+    Arg extends Iterable<EffectAny> | Record<string, EffectAny>,
+    O extends {
+      readonly concurrency?: Concurrency | undefined;
+      readonly discard?: boolean | undefined;
+      readonly mode?: 'default' | 'result' | undefined;
+    }
+  > = [Arg] extends [ReadonlyArray<EffectAny>]
+    ? ReturnTuple<Arg, IsDiscard<O>, IsResult<O>>
+    : [Arg] extends [Iterable<EffectAny>]
+      ? ReturnIterable<Arg, IsDiscard<O>, IsResult<O>>
+      : [Arg] extends [Record<string, EffectAny>]
+        ? ReturnObject<Arg, IsDiscard<O>, IsResult<O>>
+        : never;
 }
