@@ -396,13 +396,9 @@ describe('Effect', () => {
 
       it.effect('inherit unbounded concurrency', () =>
         Effect.gen(function* () {
-          const handle = yield* Effect.forEach(
-            [1, 2, 3],
-            (n) => Effect.of(Effect.succeed(n).asEffect().pipe(_Effect.delay(50))),
-            {
-              concurrency: 'inherit'
-            }
-          )
+          const handle = yield* Effect.forEach([1, 2, 3], (n) => Effect.succeed(n).with(_Effect.delay(50)), {
+            concurrency: 'inherit'
+          })
             .asEffect()
             .pipe(_Effect.withConcurrency('unbounded'), _Effect.forkChild);
           yield* TestClock.adjust(90);
@@ -414,17 +410,11 @@ describe('Effect', () => {
         Effect.gen(function* () {
           const done: Array<number> = [];
           const fiber = yield* Effect.forEach([1, 2, 3, 4, 5, 6], (i) =>
-            Effect.of(
-              Effect.sync(() => {
-                done.push(i);
-                return i;
-              })
-                .asEffect()
-                .pipe(_Effect.delay(300))
-            )
-          )
-            .asEffect()
-            .pipe(_Effect.forkChild);
+            Effect.sync(() => {
+              done.push(i);
+              return i;
+            }).with(_Effect.delay(300))
+          ).with(_Effect.forkChild);
           yield* TestClock.adjust(800);
           yield* Fiber.interrupt(fiber);
           const result = yield* Fiber.await(fiber);
@@ -439,18 +429,12 @@ describe('Effect', () => {
           const fiber = yield* Effect.forEach(
             [1, 2, 3],
             (i) =>
-              Effect.of(
-                Effect.sync(() => {
-                  done.push(i);
-                  return i;
-                })
-                  .asEffect()
-                  .pipe(_Effect.delay(150))
-              ),
+              Effect.sync(() => {
+                done.push(i);
+                return i;
+              }).with(_Effect.delay(150)),
             { concurrency: 'unbounded' }
-          )
-            .asEffect()
-            .pipe(_Effect.forkChild);
+          ).with(_Effect.forkChild);
           yield* TestClock.adjust(50);
           yield* Fiber.interrupt(fiber);
           const result = yield* Fiber.await(fiber);
@@ -465,18 +449,12 @@ describe('Effect', () => {
           const fiber = yield* Effect.forEach(
             [1, 2, 3, 4, 5, 6],
             (i) =>
-              Effect.of(
-                Effect.sync(() => {
-                  done.push(i);
-                  return i;
-                })
-                  .asEffect()
-                  .pipe(_Effect.delay(200))
-              ),
+              Effect.sync(() => {
+                done.push(i);
+                return i;
+              }).with(_Effect.delay(200)),
             { concurrency: 2 }
-          )
-            .asEffect()
-            .pipe(_Effect.forkChild);
+          ).with(_Effect.forkChild);
           yield* TestClock.adjust(350);
           yield* Fiber.interrupt(fiber);
           const result = yield* Fiber.await(fiber);
@@ -491,18 +469,12 @@ describe('Effect', () => {
           const handle = yield* Effect.forEach(
             [1, 2, 3, 4, 5],
             (i) =>
-              Effect.of(
-                Effect.suspend(() => {
-                  done.push(i);
-                  return i === 3 ? Effect.fail('error') : Effect.succeed(i);
-                })
-                  .asEffect()
-                  .pipe(_Effect.delay(i * 100))
-              ),
+              Effect.suspend(() => {
+                done.push(i);
+                return i === 3 ? Effect.fail('error') : Effect.succeed(i);
+              }).with(_Effect.delay(i * 100)),
             { concurrency: 'unbounded' }
-          )
-            .asEffect()
-            .pipe(_Effect.forkChild);
+          ).with(_Effect.forkChild);
           yield* TestClock.adjust(500);
           const result = yield* Fiber.await(handle);
           deepStrictEqual(result, Exit.fail('error'));

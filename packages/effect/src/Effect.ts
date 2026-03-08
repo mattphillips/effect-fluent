@@ -366,6 +366,10 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
   get exit(): Effect<Exit.Exit<A, E>, never, R> {
     return new Effect(_Effect.exit(this._effect));
   }
+
+  with<B, E2, R2>(f: (effect: _Effect.Effect<A, E, R>) => _Effect.Effect<B, E2, R2>): Effect<B, E2, R2> {
+    return new Effect(f(this._effect));
+  }
 }
 
 export type EffectAny = Effect<any, any, any>;
