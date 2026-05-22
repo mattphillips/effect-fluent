@@ -19,12 +19,12 @@
   },
   "peerDependencies": {
     "effect-fluent": "workspace:^",
-    "effect": "^4.0.0-beta.29",
+    "effect": "^4.0.0-beta.70",
     "vitest": "^4.0.0"
   },
   "devDependencies": {
     "effect-fluent": "workspace:^",
-    "effect": "^4.0.0-beta.29",
+    "effect": "^4.0.0-beta.70",
     "vitest": "4.0.18",
     "@types/node": "^25.2.0"
   }

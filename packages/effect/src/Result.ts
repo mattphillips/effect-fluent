@@ -3,6 +3,7 @@ import type { LazyArg } from 'effect/Function';
 import { dual, identity } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
 import * as _Option from 'effect/Option';
+import { pipeArguments } from 'effect/Pipeable';
 import * as _Result from 'effect/Result';
 import type { Predicate, Refinement } from 'effect/Predicate';
 import { hasProperty, isFunction } from 'effect/Predicate';
@@ -18,7 +19,11 @@ export interface ResultTypeLambda extends TypeLambda {
   readonly type: Result<this['Target'], this['Out1']>;
 }
 
-abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Yieldable<Result<A, E>, A, E> {
+export interface ResultIterator<T extends Result<any, any>> {
+  next(...args: ReadonlyArray<any>): IteratorResult<T, T extends Result<infer A, any> ? A : never>;
+}
+
+abstract class ResultBase<out A, out E> extends Inspectable {
   private readonly result: _Result.Result<A, E>;
   abstract readonly _tag: 'Success' | 'Failure';
   abstract readonly _op: 'Success' | 'Failure';
@@ -31,6 +36,10 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
 
   asResult(): _Result.Result<A, E> {
     return this.result;
+  }
+
+  pipe() {
+    return pipeArguments(this, arguments);
   }
 
   // --- Equal & Hash ---
@@ -53,13 +62,17 @@ abstract class ResultBase<out A, out E> extends Inspectable implements _Effect.Y
     return this._tag === 'Failure';
   }
 
-  // --- Yieldable (for Effect.gen) ---
+  // --- Generator interop ---
 
+  // Explicit conversion to an Effect — `Effect.fromResult` lifts Failure into
+  // an Effect failure. Use this (or `Effect.fromResult`) to yield a Result
+  // inside `Effect.gen`; the Result itself is only yieldable inside
+  // `Result.gen`.
   asEffect(): _Effect.Effect<A, E> {
-    return this.result.asEffect();
+    return _Effect.fromResult(this.result);
   }
 
-  [Symbol.iterator](): _Effect.EffectIterator<Result<A, E>> {
+  [Symbol.iterator](): ResultIterator<Result<A, E>> {
     return new Gen.SingleShotGen(this) as any;
   }
 
@@ -304,7 +317,7 @@ const gen: Gen.Gen<ResultTypeLambda> = (...args) => {
   const iterator = f();
   let state: IteratorResult<any> = iterator.next();
   while (!state.done) {
-    const current = Gen.isGenKind(state.value) ? state.value.value : state.value;
+    const current = state.value;
     if (current.isFailure()) {
       return current;
     }

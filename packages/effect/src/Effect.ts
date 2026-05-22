@@ -1,6 +1,8 @@
 import { Array as Arr, Effect as _Effect, Cause, Duration, Exit, Scheduler, Scope } from 'effect';
 import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
+import { NodeInspectSymbol } from 'effect/Inspectable';
+import { pipeArguments } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
 import { Option } from './Option.js';
@@ -9,8 +11,16 @@ import { Result } from './Result.js';
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
 
-export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect<A, E, R>, A, E, R> {
+export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> {
   readonly [EffectTypeId]: EffectTypeId = EffectTypeId;
+
+  // Brand for compatibility with `_Effect.Effect<A, E, R>` so fluent values are
+  // assignable wherever core effects are expected (notably `yield*` inside
+  // `_Effect.gen`). The actual fiber-level evaluation always happens on the
+  // inner `_effect` via `[Symbol.iterator]()` delegation below.
+  get [_Effect.TypeId](): _Effect.Variance<A, E, R> {
+    return (this._effect as any)[_Effect.TypeId];
+  }
 
   static is(u: unknown): u is Effect<unknown, unknown, unknown> {
     return hasProperty(u, EffectTypeId);
@@ -97,54 +107,29 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
     return new Effect(result.asEffect());
   }
 
-  static gen<Eff extends _Effect.Yieldable<any, any, any, any>, AEff>(
+  static gen<Eff extends Gen.Yieldable<any, any, any>, AEff>(
     f: () => Generator<Eff, AEff, never>
-  ): Effect<
-    AEff,
-    [Eff] extends [never]
-      ? never
-      : [Eff] extends [_Effect.Yieldable<infer _Self, infer _A, infer E, infer _R>]
-        ? E
-        : never,
-    [Eff] extends [never]
-      ? never
-      : [Eff] extends [_Effect.Yieldable<infer _Self, infer _A, infer _E, infer R>]
-        ? R
-        : never
-  >;
-  static gen<Self, Eff extends _Effect.Yieldable<any, any, any, any>, AEff>(
+  ): Effect<AEff, Gen.YieldError<Eff>, Gen.YieldServices<Eff>>;
+  static gen<Self, Eff extends Gen.Yieldable<any, any, any>, AEff>(
     self: Self,
     f: (this: Self) => Generator<Eff, AEff, never>
-  ): Effect<
-    AEff,
-    [Eff] extends [never]
-      ? never
-      : [Eff] extends [_Effect.Yieldable<infer _Self, infer _A, infer E, infer _R>]
-        ? E
-        : never,
-    [Eff] extends [never]
-      ? never
-      : [Eff] extends [_Effect.Yieldable<infer _Self, infer _A, infer _E, infer R>]
-        ? R
-        : never
-  >;
+  ): Effect<AEff, Gen.YieldError<Eff>, Gen.YieldServices<Eff>>;
   static gen(...args: [any] | [any, any]) {
     const [f, self] = args.length === 1 ? [args[0], undefined] : [args[1], args[0]];
-    // Convert the generator to work with Effects
     return new Effect(
-      // Reminder a lot of this logic is the same in Option.ts
       _Effect.gen(function* () {
         const generator = self !== undefined ? f.call(self) : f();
         let result = generator.next();
-
         while (!result.done) {
+          // Lift fluent Option/Result into Effect explicitly — core's gen
+          // no longer auto-unwraps them. Fluent and core Effects pass through
+          // (fluent's [Symbol.iterator] delegates to the inner primitive).
           const yieldable = result.value;
-          // Convert Yieldable to Effect using asEffect()
-          const effect = yieldable.asEffect();
+          const effect =
+            Option.is(yieldable) || Result.is(yieldable) ? yieldable.asEffect() : yieldable;
           const nextValue = yield* effect;
           result = generator.next(nextValue);
         }
-
         return result.value;
       })
     );
@@ -270,6 +255,18 @@ export class Effect<A, E = never, R = never> implements _Effect.Yieldable<Effect
 
   [Symbol.iterator](): _Effect.EffectIterator<Effect<A, E, R>> {
     return this._effect[Symbol.iterator]() as any;
+  }
+
+  pipe() {
+    return pipeArguments(this, arguments);
+  }
+
+  toJSON(): unknown {
+    return { _id: 'effect-fluent/Effect', effect: (this._effect as any).toJSON?.() };
+  }
+
+  [NodeInspectSymbol](): unknown {
+    return this.toJSON();
   }
 
   map<B>(f: (a: A) => B): Effect<B, E, R> {
@@ -556,4 +553,28 @@ export namespace All {
       : [Arg] extends [Record<string, EffectAny>]
         ? ReturnObject<Arg, IsDiscard<O>, IsResult<O>>
         : never;
+}
+
+export namespace Gen {
+  // What can be `yield*`-ed inside `Effect.gen`: a core/fluent Effect, a fluent
+  // Option (lifts None → NoSuchElementError), or a fluent Result (lifts Failure
+  // → the Result's error type). Runtime conversion happens in `Effect.gen`'s
+  // body via `.asEffect()`.
+  export type Yieldable<A, E, R> = _Effect.Effect<A, E, R> | Option<A> | Result<A, E>;
+
+  export type YieldError<Eff> = [Eff] extends [never]
+    ? never
+    : Eff extends _Effect.Effect<any, infer E, any>
+      ? E
+      : Eff extends Option<any>
+        ? Cause.NoSuchElementError
+        : Eff extends Result<any, infer E>
+          ? E
+          : never;
+
+  export type YieldServices<Eff> = [Eff] extends [never]
+    ? never
+    : Eff extends _Effect.Effect<any, any, infer R>
+      ? R
+      : never;
 }

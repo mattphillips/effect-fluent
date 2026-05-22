@@ -18,10 +18,10 @@
     "coverage": "vitest --coverage"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-beta.29"
+    "effect": "^4.0.0-beta.70"
   },
   "devDependencies": {
-    "effect": "^4.0.0-beta.29",
+    "effect": "^4.0.0-beta.70",
     "@types/node": "^25.2.0"
   }
 }

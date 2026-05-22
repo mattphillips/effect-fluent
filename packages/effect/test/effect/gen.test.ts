@@ -1,6 +1,6 @@
 import { describe, it } from '@effect-fluent/vitest';
 import { deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
-import { Effect as _Effect, ServiceMap } from 'effect';
+import { Effect as _Effect, Context } from 'effect';
 import { Effect } from '../../src/Effect.js';
 
 describe('Effect', () => {
@@ -39,7 +39,7 @@ describe('Effect', () => {
         readonly query: (sql: string) => _Effect.Effect<Array<unknown>>;
       }
 
-      const Database = ServiceMap.Service<
+      const Database = Context.Service<
         Database,
         { readonly query: (sql: string) => _Effect.Effect<Array<unknown>> }
       >('Database');
@@ -62,7 +62,7 @@ describe('Effect', () => {
         readonly query: (sql: string) => Effect<Array<unknown>>;
       }
 
-      const Database = ServiceMap.Service<Database, { readonly query: (sql: string) => Effect<Array<unknown>> }>(
+      const Database = Context.Service<Database, { readonly query: (sql: string) => Effect<Array<unknown>> }>(
         'Database'
       );
 

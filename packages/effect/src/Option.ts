@@ -5,6 +5,7 @@ import type { TypeLambda } from 'effect/HKT';
 import * as _Option from 'effect/Option';
 import type { Order } from 'effect/Order';
 import * as order from 'effect/Order';
+import { pipeArguments } from 'effect/Pipeable';
 import type { Predicate, Refinement } from 'effect/Predicate';
 import { hasProperty, isFunction } from 'effect/Predicate';
 import type { NotFunction } from 'effect/Types';
@@ -18,10 +19,11 @@ export interface OptionTypeLambda extends TypeLambda {
   readonly type: Option<this['Target']>;
 }
 
-abstract class OptionBase<out A>
-  extends Inspectable
-  implements _Effect.Yieldable<Option<A>, A, Cause.NoSuchElementError>
-{
+export interface OptionIterator<T extends Option<any>> {
+  next(...args: ReadonlyArray<any>): IteratorResult<T, T extends Option<infer A> ? A : never>;
+}
+
+abstract class OptionBase<out A> extends Inspectable {
   private readonly option: _Option.Option<A>;
   abstract readonly _tag: 'Some' | 'None';
   abstract readonly _op: 'Some' | 'None';
@@ -34,6 +36,10 @@ abstract class OptionBase<out A>
 
   asOption(): _Option.Option<A> {
     return this.option;
+  }
+
+  pipe() {
+    return pipeArguments(this, arguments);
   }
 
   // --- Equal & Hash ---
@@ -56,13 +62,17 @@ abstract class OptionBase<out A>
     return this._tag === 'None';
   }
 
-  // --- Yieldable (for Effect.gen) ---
+  // --- Generator interop ---
 
+  // Explicit conversion to an Effect — `Effect.fromOption` lifts None to a
+  // `NoSuchElementError` failure. Use this (or `Effect.fromOption`) to yield
+  // an Option inside `Effect.gen`; the Option itself is only yieldable inside
+  // `Option.gen`.
   asEffect(): _Effect.Effect<A, Cause.NoSuchElementError> {
-    return this.option.asEffect();
+    return _Effect.fromOption(this.option);
   }
 
-  [Symbol.iterator](): _Effect.EffectIterator<Option<A>> {
+  [Symbol.iterator](): OptionIterator<Option<A>> {
     return new Gen.SingleShotGen(this) as any;
   }
 
@@ -328,7 +338,7 @@ const gen: Gen.Gen<OptionTypeLambda> = (...args) => {
   const iterator = f();
   let state: IteratorResult<any> = iterator.next();
   while (!state.done) {
-    const current = Gen.isGenKind(state.value) ? state.value.value : state.value;
+    const current = state.value;
     if (current.isNone()) {
       return current;
     }

@@ -48,7 +48,7 @@ describe('Option', () => {
     it.effect('Option.none fails with NoSuchElementError in Effect.gen', () =>
       Effect.gen(function* () {
         const exit = yield* Effect.fromOption(Option.none<number>()).exit;
-        assertExitFailure(exit, Cause.fail(new Cause.NoSuchElementError()));
+        assertExitFailure(exit, Cause.fail(new Cause.NoSuchElementError('Effect.fromOption: Option.none')));
       })
     );
   });

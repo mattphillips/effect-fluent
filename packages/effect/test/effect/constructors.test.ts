@@ -174,7 +174,7 @@ describe('Effect', () => {
       it.effect('lifts option none to an effect', () => {
         return Effect.gen(function* () {
           const result = yield* Effect.fromOption(Option.none()).flip;
-          deepStrictEqual(result, new Cause.NoSuchElementError());
+          deepStrictEqual(result, new Cause.NoSuchElementError('Effect.fromOption: Option.none'));
         });
       });
     });
