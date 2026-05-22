@@ -1,10 +1,11 @@
 import { format } from 'effect/Formatter';
 import { NodeInspectSymbol } from 'effect/Inspectable';
+import { Class as PipeableClass } from 'effect/Pipeable';
 
-export abstract class Inspectable {
+export abstract class Inspectable extends PipeableClass {
   abstract toJSON(): unknown;
 
-  toString(): string {
+  override toString(): string {
     return format(this.toJSON(), { ignoreToString: true, space: 2 });
   }
 

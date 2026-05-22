@@ -2,7 +2,7 @@ import { Array as Arr, Effect as _Effect, Cause, Duration, Exit, Scheduler, Scop
 import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
-import { pipeArguments } from 'effect/Pipeable';
+import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
 import { Option } from './Option.js';
@@ -11,7 +11,7 @@ import { Result } from './Result.js';
 export const EffectTypeId: unique symbol = Symbol.for('~effect-fluent/Effect') as EffectTypeId;
 export type EffectTypeId = typeof EffectTypeId;
 
-export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> {
+export class Effect<A, E = never, R = never> extends PipeableClass implements _Effect.Effect<A, E, R> {
   readonly [EffectTypeId]: EffectTypeId = EffectTypeId;
 
   // Brand for compatibility with `_Effect.Effect<A, E, R>` so fluent values are
@@ -240,6 +240,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> 
   private readonly _effect: _Effect.Effect<A, E, R>;
 
   private constructor(effect: _Effect.Effect<A, E, R>) {
+    super();
     this._effect = effect;
   }
 
@@ -249,10 +250,6 @@ export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> 
 
   [Symbol.iterator](): _Effect.EffectIterator<Effect<A, E, R>> {
     return this._effect[Symbol.iterator]() as any;
-  }
-
-  pipe() {
-    return pipeArguments(this, arguments);
   }
 
   toJSON(): unknown {

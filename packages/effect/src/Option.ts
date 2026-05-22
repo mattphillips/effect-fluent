@@ -5,7 +5,6 @@ import type { TypeLambda } from 'effect/HKT';
 import * as _Option from 'effect/Option';
 import type { Order } from 'effect/Order';
 import * as order from 'effect/Order';
-import { pipeArguments } from 'effect/Pipeable';
 import type { Predicate, Refinement } from 'effect/Predicate';
 import { hasProperty, isFunction } from 'effect/Predicate';
 import type { NotFunction } from 'effect/Types';
@@ -36,10 +35,6 @@ abstract class OptionBase<out A> extends Inspectable {
 
   asOption(): _Option.Option<A> {
     return this.option;
-  }
-
-  pipe() {
-    return pipeArguments(this, arguments);
   }
 
   // --- Equal & Hash ---

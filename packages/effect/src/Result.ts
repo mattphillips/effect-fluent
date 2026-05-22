@@ -3,7 +3,6 @@ import type { LazyArg } from 'effect/Function';
 import { dual, identity } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
 import * as _Option from 'effect/Option';
-import { pipeArguments } from 'effect/Pipeable';
 import * as _Result from 'effect/Result';
 import type { Predicate, Refinement } from 'effect/Predicate';
 import { hasProperty, isFunction } from 'effect/Predicate';
@@ -36,10 +35,6 @@ abstract class ResultBase<out A, out E> extends Inspectable {
 
   asResult(): _Result.Result<A, E> {
     return this.result;
-  }
-
-  pipe() {
-    return pipeArguments(this, arguments);
   }
 
   // --- Equal & Hash ---
