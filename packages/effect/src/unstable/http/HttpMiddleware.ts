@@ -1,15 +1,38 @@
 /**
+ * Server-side HTTP middleware for wrapping `HttpServerResponse` effects with
+ * cross-cutting request and response behavior.
+ *
+ * A middleware is a function from one HTTP server app effect to another. The app
+ * is evaluated with the current `HttpServerRequest` service in its context, so
+ * middleware in this module can inspect or rewrite the request, provide
+ * request-scoped services, attach pre-response hooks, or observe the app exit
+ * while preserving normal Effect error and interruption semantics.
+ *
+ * Use this module for common server concerns such as access logging, trace span
+ * creation, trusting forwarded proxy headers, parsing search parameters, and
+ * adding CORS handling. Middleware can be applied directly when serving an
+ * `HttpServer` / `HttpEffect` app or registered through `HttpRouter.middleware`
+ * for route-scoped or global behavior.
+ *
+ * Middleware composition is order-sensitive, and each middleware may change the
+ * wrapped effect's requirements or error channel. These functions expect a
+ * per-request `HttpServerRequest` to be present; context-providing middleware
+ * should wrap handlers before they access the provided service, and
+ * error-handling middleware should be installed where its transformed error type
+ * matches the surrounding app or router registration.
+ *
  * @since 4.0.0
  */
 import { Clock } from "../../Clock.ts"
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import { constant, constFalse } from "../../Function.ts"
 import * as internalEffect from "../../internal/effect.ts"
 import * as Layer from "../../Layer.ts"
+import * as Option from "../../Option.ts"
 import type { Predicate } from "../../Predicate.ts"
 import type { ReadonlyRecord } from "../../Record.ts"
 import { TracerEnabled } from "../../References.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import { ParentSpan } from "../../Tracer.ts"
 import * as Headers from "./Headers.ts"
 import { causeResponseStripped, exitResponse } from "./HttpServerError.ts"
@@ -21,18 +44,25 @@ import * as TraceContext from "./HttpTraceContext.ts"
 import { appendPreResponseHandlerUnsafe } from "./internal/preResponseHandler.ts"
 
 /**
- * @since 4.0.0
+ * Middleware that transforms an HTTP server app effect into another HTTP server app effect.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface HttpMiddleware {
   <E, R>(self: Effect.Effect<HttpServerResponse, E, R | HttpServerRequest>): Effect.Effect<HttpServerResponse, any, any>
 }
 
 /**
+ * Namespace containing types associated with `HttpMiddleware`.
+ *
  * @since 4.0.0
  */
 export declare namespace HttpMiddleware {
   /**
+   * Callable type representing middleware already specialized to a particular transformed app type.
+   *
+   * @category models
    * @since 4.0.0
    */
   export interface Applied<A extends Effect.Effect<HttpServerResponse, any, any>, E, R> {
@@ -41,60 +71,85 @@ export declare namespace HttpMiddleware {
 }
 
 /**
- * @since 4.0.0
+ * Defines an `HttpMiddleware` while preserving its precise type.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const make = <M extends HttpMiddleware>(middleware: M): M => middleware
 
 const loggerDisabledRequests = new WeakSet<object>()
 
+const stripSearchAndHash = (url: string): string => {
+  const queryIndex = url.indexOf("?")
+  const hashIndex = url.indexOf("#")
+
+  if (queryIndex === -1) {
+    return hashIndex === -1 ? url : url.slice(0, hashIndex)
+  }
+  if (hashIndex === -1) {
+    return url.slice(0, queryIndex)
+  }
+  return url.slice(0, Math.min(queryIndex, hashIndex))
+}
+
 /**
- * @since 4.0.0
+ * Runs an effect with HTTP response logging disabled for the current server request.
+ *
  * @category Logger
+ * @since 4.0.0
  */
 export const withLoggerDisabled = <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R | HttpServerRequest> =>
   Effect.withFiber((fiber) => {
-    const request = ServiceMap.getUnsafe(fiber.services, HttpServerRequest)
+    const request = Context.getUnsafe(fiber.context, HttpServerRequest)
     loggerDisabledRequests.add(request.source)
     return self
   })
 
 /**
- * @since 4.0.0
+ * Context reference for a predicate that disables server-side tracing for matching requests.
+ *
  * @category Tracer
+ * @since 4.0.0
  */
-export const TracerDisabledWhen = ServiceMap.Reference<Predicate<HttpServerRequest>>(
+export const TracerDisabledWhen = Context.Reference<Predicate<HttpServerRequest>>(
   "effect/http/HttpMiddleware/TracerDisabledWhen",
   { defaultValue: () => constFalse }
 )
 
 /**
- * @since 4.0.0
+ * Creates a layer that disables server-side tracing for requests whose URL exactly matches one of the supplied URLs.
+ *
  * @category Tracer
+ * @since 4.0.0
  */
 export const layerTracerDisabledForUrls = (
   urls: ReadonlyArray<string>
 ): Layer.Layer<never> => Layer.succeed(TracerDisabledWhen)((req) => urls.includes(req.url))
 
 /**
- * @since 4.0.0
+ * Context reference for generating server span names from HTTP server requests.
+ *
  * @category Tracer
+ * @since 4.0.0
  */
-export const SpanNameGenerator = ServiceMap.Reference<(request: HttpServerRequest) => string>(
+export const SpanNameGenerator = Context.Reference<(request: HttpServerRequest) => string>(
   "@effect/platform/HttpMiddleware/SpanNameGenerator",
   { defaultValue: () => (request) => `http.server ${request.method}` }
 )
 
 /**
- * @since 4.0.0
+ * Middleware that logs sent HTTP responses with request method, request URL, and response status annotations.
+ *
  * @category Logger
+ * @since 4.0.0
  */
 export const logger: <E, R>(
   httpApp: Effect.Effect<HttpServerResponse, E, HttpServerRequest | R>
-) => Effect.Effect<HttpServerResponse, E, HttpServerRequest | R> = make((httpApp) => {
-  let counter = 0
-  return Effect.withFiber((fiber) => {
-    const request = ServiceMap.getUnsafe(fiber.services, HttpServerRequest)
+) => Effect.Effect<HttpServerResponse, E, HttpServerRequest | R> = make((httpApp) =>
+  Effect.withFiber((fiber) => {
+    const request = Context.getUnsafe(fiber.context, HttpServerRequest)
+    const path = stripSearchAndHash(request.url)
     return Effect.withLogSpan(
       Effect.flatMap(Effect.exit(httpApp), (exit) => {
         if (loggerDisabledRequests.has(request.source)) {
@@ -102,9 +157,9 @@ export const logger: <E, R>(
         } else if (exit._tag === "Failure") {
           const [response, cause] = causeResponseStripped(exit.cause)
           return Effect.andThen(
-            Effect.annotateLogs(Effect.log(cause ?? "Sent HTTP Response"), {
+            Effect.annotateLogs(Effect.log(Option.getOrElse(cause, () => "Sent HTTP Response")), {
               "http.method": request.method,
-              "http.url": request.url,
+              "http.url": path,
               "http.status": response.status
             }),
             exit
@@ -113,57 +168,59 @@ export const logger: <E, R>(
         return Effect.andThen(
           Effect.annotateLogs(Effect.log("Sent HTTP response"), {
             "http.method": request.method,
-            "http.url": request.url,
+            "http.url": path,
             "http.status": exit.value.status
           }),
           exit
         )
       }),
-      `http.span.${++counter}`
+      "http.span"
     )
   })
-})
+)
 
 /**
- * @since 4.0.0
+ * Middleware that creates a server trace span for each request and records request and response HTTP attributes.
+ *
  * @category Tracer
+ * @since 4.0.0
  */
 export const tracer: <E, R>(
   httpApp: Effect.Effect<HttpServerResponse, E, HttpServerRequest | R>
 ) => Effect.Effect<HttpServerResponse, E, HttpServerRequest | R> = make((httpApp) =>
   Effect.withFiber((fiber) => {
-    const request = ServiceMap.getUnsafe(fiber.services, HttpServerRequest)
+    const request = Context.getUnsafe(fiber.context, HttpServerRequest)
     const disabled = !fiber.getRef(TracerEnabled) || fiber.getRef(TracerDisabledWhen)(request)
     if (disabled) {
       return httpApp
     }
     const nameGenerator = fiber.getRef(SpanNameGenerator)
     const span = internalEffect.makeSpanUnsafe(fiber, nameGenerator(request), {
-      parent: TraceContext.fromHeaders(request.headers),
+      parent: Option.getOrUndefined(TraceContext.fromHeaders(request.headers)),
       kind: "server"
     })
-    const prevServices = fiber.services
-    fiber.setServices(ServiceMap.add(fiber.services, ParentSpan, span))
+    const prevServices = fiber.context
+    fiber.setContext(Context.add(fiber.context, ParentSpan, span))
     return Effect.onExitPrimitive(httpApp, (exit) => {
-      fiber.setServices(prevServices)
+      fiber.setContext(prevServices)
       const endTime = fiber.getRef(Clock).currentTimeNanosUnsafe()
-      fiber.currentScheduler.scheduleTask(() => {
+      fiber.currentDispatcher.scheduleTask(() => {
         const url = Request.toURL(request)
-        if (url !== undefined && (url.username !== "" || url.password !== "")) {
-          url.username = "REDACTED"
-          url.password = "REDACTED"
+        if (Option.isSome(url) && (url.value.username !== "" || url.value.password !== "")) {
+          url.value.username = "REDACTED"
+          url.value.password = "REDACTED"
         }
         const redactedHeaderNames = fiber.getRef(Headers.CurrentRedactedNames)
         const requestHeaders = Headers.redact(request.headers, redactedHeaderNames)
         span.attribute("http.request.method", request.method)
-        if (url !== undefined) {
-          span.attribute("url.full", url.toString())
-          span.attribute("url.path", url.pathname)
-          const query = url.search.slice(1)
+        if (Option.isSome(url)) {
+          span.attribute("url.full", url.value.toString())
+          span.attribute("url.path", url.value.pathname)
+          const query = url.value.search.slice(1)
           if (query !== "") {
-            span.attribute("url.query", url.search.slice(1))
+            span.attribute("url.query", url.value.search.slice(1))
           }
-          span.attribute("url.scheme", url.protocol.slice(0, -1))
+          span.attribute("url.scheme", url.value.protocol.slice(0, -1))
         }
         if (request.headers["user-agent"] !== undefined) {
           span.attribute("user_agent.original", request.headers["user-agent"])
@@ -171,8 +228,8 @@ export const tracer: <E, R>(
         for (const name in requestHeaders) {
           span.attribute(`http.request.header.${name}`, String(requestHeaders[name]))
         }
-        if (request.remoteAddress !== undefined) {
-          span.attribute("client.address", request.remoteAddress)
+        if (Option.isSome(request.remoteAddress)) {
+          span.attribute("client.address", request.remoteAddress.value)
         }
         const response = exitResponse(exit)
         span.attribute("http.response.status_code", response.status)
@@ -188,8 +245,10 @@ export const tracer: <E, R>(
 )
 
 /**
- * @since 4.0.0
+ * Middleware that trusts `X-Forwarded-Host` and `X-Forwarded-For`, updating the request host header and remote address.
+ *
  * @category Proxying
+ * @since 4.0.0
  */
 export const xForwardedHeaders = make((httpApp) =>
   Effect.updateService(httpApp, HttpServerRequest, (request) =>
@@ -200,21 +259,23 @@ export const xForwardedHeaders = make((httpApp) =>
           "host",
           request.headers["x-forwarded-host"]
         ),
-        remoteAddress: request.headers["x-forwarded-for"]?.split(",")[0].trim()
+        remoteAddress: Option.fromNullishOr(request.headers["x-forwarded-for"]?.split(",")[0].trim())
       })
       : request)
 )
 
 /**
- * @since 4.0.0
+ * Middleware that parses the current request URL's search parameters and provides them as `ParsedSearchParams`.
+ *
  * @category Search params
+ * @since 4.0.0
  */
 export const searchParamsParser = <E, R>(
   httpApp: Effect.Effect<HttpServerResponse, E, R>
 ): Effect.Effect<Response.HttpServerResponse, E, HttpServerRequest | Exclude<R, Request.ParsedSearchParams>> =>
   Effect.withFiber((fiber) => {
-    const services = fiber.services
-    const request = ServiceMap.getUnsafe(services, HttpServerRequest)
+    const services = fiber.context
+    const request = Context.getUnsafe(services, HttpServerRequest)
     const params = Request.searchParamsFromURL(new URL(request.originalUrl))
     return Effect.provideService(
       httpApp,
@@ -224,8 +285,10 @@ export const searchParamsParser = <E, R>(
   })
 
 /**
- * @since 4.0.0
+ * Middleware that handles CORS preflight requests and adds configured CORS headers to HTTP responses.
+ *
  * @category CORS
+ * @since 4.0.0
  */
 export const cors = (options?: {
   readonly allowedOrigins?: ReadonlyArray<string> | Predicate<string> | undefined
@@ -331,7 +394,7 @@ export const cors = (options?: {
     httpApp: Effect.Effect<HttpServerResponse, E, R>
   ): Effect.Effect<HttpServerResponse, E, R | HttpServerRequest> =>
     Effect.withFiber((fiber) => {
-      const request = ServiceMap.getUnsafe(fiber.services, HttpServerRequest)
+      const request = Context.getUnsafe(fiber.context, HttpServerRequest)
       if (request.method === "OPTIONS") {
         return Effect.succeed(Response.empty({
           status: 204,

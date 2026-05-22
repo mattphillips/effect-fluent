@@ -1,15 +1,46 @@
 /**
+ * The `Runners` module defines the service used by the unstable cluster runtime
+ * to communicate with processes that host entity shards. It is the transport
+ * boundary between sharding decisions and runner execution: callers can ping a
+ * runner, send requests or envelopes, notify a runner that persisted work is
+ * available, and report an address as unavailable.
+ *
+ * The default implementation wraps lower-level runner callbacks with cluster
+ * message semantics. Persisted messages are written to `MessageStorage` before
+ * delivery, duplicate requests can resume from stored replies, and local sends
+ * can optionally serialize and deserialize messages to exercise the same path as
+ * remote delivery.
+ *
+ * **Common tasks**
+ *
+ * - Provide runner communication with {@link layerRpc}
+ * - Build a custom implementation with {@link make}
+ * - Use {@link makeNoop} or {@link layerNoop} when no remote runners are
+ *   available
+ * - Define runner-to-runner protocol support with {@link Rpcs} and
+ *   {@link RpcClientProtocol}
+ *
+ * **Gotchas**
+ *
+ * - `notify` is only for RPCs annotated as persisted; non-persisted messages
+ *   should be sent directly.
+ * - Failed remote sends can fall back to reading replies from storage, so reply
+ *   polling and `entityReplyPollInterval` affect recovery latency.
+ * - Unavailable runners invalidate cached RPC clients, but shard ownership and
+ *   rebalancing are coordinated by the sharding layer rather than this module.
+ *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Latch from "../../Latch.ts"
 import * as Layer from "../../Layer.ts"
+import * as Option from "../../Option.ts"
 import * as Queue from "../../Queue.ts"
 import * as RcMap from "../../RcMap.ts"
 import * as Schema from "../../Schema.ts"
 import type { Scope } from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Rpc from "../rpc/Rpc.ts"
 import * as RpcClient_ from "../rpc/RpcClient.ts"
 import type { RpcClientError } from "../rpc/RpcClientError.ts"
@@ -27,10 +58,14 @@ import { ShardingConfig } from "./ShardingConfig.ts"
 import * as Snowflake from "./Snowflake.ts"
 
 /**
- * @since 1.0.0
+ * Service for communicating with cluster runners, including pinging runners,
+ * sending and notifying messages, coordinating persisted replies, and marking
+ * runners unavailable.
+ *
  * @category context
+ * @since 4.0.0
  */
-export class Runners extends ServiceMap.Service<Runners, {
+export class Runners extends Context.Service<Runners, {
   /**
    * Checks if a Runner is responsive.
    */
@@ -80,7 +115,7 @@ export class Runners extends ServiceMap.Service<Runners, {
    */
   readonly notify: <R extends Rpc.Any>(
     options: {
-      readonly address: RunnerAddress | undefined
+      readonly address: Option.Option<RunnerAddress>
       readonly message: Message.Outgoing<R>
       readonly discard: boolean
     }
@@ -111,8 +146,12 @@ export class Runners extends ServiceMap.Service<Runners, {
 }>()("effect/cluster/Runners") {}
 
 /**
- * @since 1.0.0
- * @category Constructors
+ * Builds the `Runners` service from remote runner callbacks and adds local
+ * message persistence, duplicate request handling, optional local serialization
+ * simulation, and polling for persisted replies.
+ *
+ * @category constructors
+ * @since 4.0.0
  */
 export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal">) => Effect.Effect<
   Runners["Service"],
@@ -131,7 +170,7 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
     afterPersist: (message: Message.Outgoing<any>, isDuplicate: boolean) => Effect.Effect<void, E>
   ): Effect.Effect<void, E | PersistenceError> {
     const rpc = message.rpc as any as Rpc.AnyWithProps
-    const persisted = ServiceMap.get(rpc.annotations, Persisted)
+    const persisted = Context.get(rpc.annotations, Persisted)
     if (!persisted) {
       return Effect.die("Runners.notify only supports persisted messages")
     }
@@ -166,8 +205,8 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
         Duplicate: ({ lastReceivedReply, originalId }) => {
           // If the last received reply is an exit, we can just return it
           // as the response.
-          if (lastReceivedReply && lastReceivedReply._tag === "WithExit") {
-            return message.respond(lastReceivedReply.withRequestId(message.envelope.requestId))
+          if (Option.isSome(lastReceivedReply) && lastReceivedReply.value._tag === "WithExit") {
+            return message.respond(lastReceivedReply.value.withRequestId(message.envelope.requestId))
           }
           requestIdRewrites.set(message.envelope.requestId, originalId)
           return afterPersist(
@@ -341,10 +380,10 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
       return notifyWith(message, (message, duplicate) => {
         if (discard || message._tag === "OutgoingEnvelope") {
           return options.notify(options_)
-        } else if (!duplicate && options_.address) {
+        } else if (!duplicate && Option.isSome(options_.address)) {
           return Effect.catch(
             options.send({
-              address: options_.address,
+              address: options_.address.value,
               message
             }),
             (_) => replyFromStorage(message)
@@ -379,8 +418,12 @@ export const make: (options: Omit<Runners["Service"], "sendLocal" | "notifyLocal
 })
 
 /**
- * @since 1.0.0
+ * Creates a no-op `Runners` service that rejects sends with
+ * `EntityNotAssignedToRunner` and ignores notifications, pings, and unavailable
+ * runner reports.
+ *
  * @category No-op
+ * @since 4.0.0
  */
 export const makeNoop: Effect.Effect<
   Runners["Service"],
@@ -394,8 +437,11 @@ export const makeNoop: Effect.Effect<
 })
 
 /**
- * @since 1.0.0
- * @category Layers
+ * Layer that provides the no-op `Runners` service, using the default snowflake
+ * generator.
+ *
+ * @category layers
+ * @since 4.0.0
  */
 export const layerNoop: Layer.Layer<
   Runners,
@@ -414,8 +460,11 @@ const rpcErrors: Schema.Union<[
 ])
 
 /**
- * @since 1.0.0
+ * RPC group used for runner-to-runner communication, including ping, notify,
+ * effect, stream, and envelope messages.
+ *
  * @category Rpcs
+ * @since 4.0.0
  */
 export class Rpcs extends RpcGroup.make(
   Rpc.make("Ping"),
@@ -453,14 +502,19 @@ export class Rpcs extends RpcGroup.make(
 ) {}
 
 /**
- * @since 1.0.0
+ * Client interface generated from the runner RPC group.
+ *
  * @category Rpcs
+ * @since 4.0.0
  */
 export interface RpcClient extends RpcClient_.FromGroup<typeof Rpcs, RpcClientError> {}
 
 /**
- * @since 1.0.0
+ * Builds a runner RPC client from the current `RpcClient.Protocol`, using the
+ * `Runners` span prefix with tracing disabled.
+ *
  * @category Rpcs
+ * @since 4.0.0
  */
 export const makeRpcClient: Effect.Effect<
   RpcClient,
@@ -469,8 +523,12 @@ export const makeRpcClient: Effect.Effect<
 > = RpcClient_.make(Rpcs, { spanPrefix: "Runners", disableTracing: true })
 
 /**
- * @since 1.0.0
+ * Builds a `Runners` service backed by RPC clients, caching a client per runner
+ * address and dispatching ping, notify, effect, stream, and envelope messages over
+ * the runner protocol.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const makeRpc: Effect.Effect<
   Runners["Service"],
@@ -504,7 +562,7 @@ export const makeRpc: Effect.Effect<
     },
     send({ address, message }) {
       const rpc = message.rpc as any as Rpc.AnyWithProps
-      const isPersisted = ServiceMap.get(rpc.annotations, Persisted)
+      const isPersisted = Context.get(rpc.annotations, Persisted)
       if (message._tag === "OutgoingEnvelope") {
         return RcMap.get(clients, address).pipe(
           Effect.flatMap((client) =>
@@ -532,7 +590,7 @@ export const makeRpc: Effect.Effect<
               Effect.catchTag("RpcClientError", Effect.die),
               Effect.flatMap((reply) =>
                 Schema.decodeEffect(Reply.Reply(message.rpc))(reply).pipe(
-                  Effect.provideServices(message.services),
+                  Effect.provideContext(message.context),
                   Effect.orDie
                 )
               ),
@@ -566,7 +624,7 @@ export const makeRpc: Effect.Effect<
                 Effect.flatMap(message.respond),
                 Effect.forever,
                 Effect.catchTag("RpcClientError", Effect.die),
-                Effect.provideServices(message.services),
+                Effect.provideContext(message.context),
                 Effect.catchTag("Done", (_) => Effect.void),
                 Effect.catchDefect(() => Effect.fail(new RunnerUnavailable({ address })))
               )
@@ -584,23 +642,29 @@ export const makeRpc: Effect.Effect<
       })
     },
     notify({ address, message }) {
-      if (!address) {
+      if (Option.isNone(address)) {
         return Effect.void
       }
       const envelope = message.envelope
-      return RcMap.get(clients, address).pipe(
-        Effect.flatMap((client) => client.Notify({ envelope })),
-        Effect.scoped,
-        Effect.ignore
-      )
+      const encode: Effect.Effect<Envelope.AckChunk | Envelope.Interrupt | Envelope.PartialRequest> =
+        message._tag === "OutgoingRequest" ? Effect.orDie(Message.serializeRequest(message)) : Effect.succeed(envelope)
+      return Effect.flatMap(encode, (envelope) =>
+        RcMap.get(clients, address.value).pipe(
+          Effect.flatMap((client) => client.Notify({ envelope })),
+          Effect.scoped,
+          Effect.ignore
+        ))
     },
     onRunnerUnavailable: (address) => RcMap.invalidate(clients, address)
   })
 })
 
 /**
- * @since 1.0.0
- * @category Layers
+ * Layer that provides an RPC-backed `Runners` service using `RpcClientProtocol`,
+ * message storage, sharding configuration, and the default snowflake generator.
+ *
+ * @category layers
+ * @since 4.0.0
  */
 export const layerRpc: Layer.Layer<
   Runners,
@@ -611,10 +675,13 @@ export const layerRpc: Layer.Layer<
 )
 
 /**
- * @since 1.0.0
+ * Service that creates an RPC client protocol for communicating with a runner at a
+ * given address.
+ *
  * @category Client
+ * @since 4.0.0
  */
-export class RpcClientProtocol extends ServiceMap.Service<
+export class RpcClientProtocol extends Context.Service<
   RpcClientProtocol,
   (address: RunnerAddress) => Effect.Effect<RpcClient_.Protocol["Service"], never, Scope>
 >()("effect/cluster/Runners/RpcClientProtocol") {}

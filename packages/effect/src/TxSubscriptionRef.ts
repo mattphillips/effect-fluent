@@ -24,9 +24,10 @@ const TypeId = "~effect/transactions/TxSubscriptionRef"
  * committed changes. Subscribers receive the current value followed by every subsequent
  * update via a transactional dequeue.
  *
- * @example
+ * **Example** (Subscribing to transactional changes)
+ *
  * ```ts
- * import { Effect, TxSubscriptionRef, TxQueue } from "effect"
+ * import { Effect, TxQueue, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(0)
@@ -45,8 +46,8 @@ const TypeId = "~effect/transactions/TxSubscriptionRef"
  * })
  * ```
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
 export interface TxSubscriptionRef<in out A> extends Inspectable, Pipeable {
   readonly [TypeId]: typeof TypeId
@@ -78,7 +79,8 @@ const TxSubscriptionRefProto: Omit<TxSubscriptionRef<any>, typeof TypeId | "ref"
 /**
  * Creates a new TxSubscriptionRef with the specified initial value.
  *
- * @example
+ * **Example** (Creating a transactional subscription reference)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -89,10 +91,10 @@ const TxSubscriptionRefProto: Omit<TxSubscriptionRef<any>, typeof TypeId | "ref"
  * })
  * ```
  *
- * @since 4.0.0
  * @category constructors
+ * @since 3.10.0
  */
-export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>, never, Effect.Transaction> =>
+export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>> =>
   Effect.gen(function*() {
     const ref = yield* TxRef.make(value)
     const pubsub = yield* TxPubSub.unbounded<A>()
@@ -101,7 +103,7 @@ export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>, never, Ef
     self.ref = ref
     self.pubsub = pubsub
     return self
-  })
+  }).pipe(Effect.tx)
 
 // =============================================================================
 // Getters
@@ -110,7 +112,8 @@ export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>, never, Ef
 /**
  * Reads the current value of the TxSubscriptionRef.
  *
- * @example
+ * **Example** (Reading the current value)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -121,10 +124,10 @@ export const make = <A>(value: A): Effect.Effect<TxSubscriptionRef<A>, never, Ef
  * })
  * ```
  *
- * @since 4.0.0
  * @category getters
+ * @since 3.10.0
  */
-export const get = <A>(self: TxSubscriptionRef<A>): Effect.Effect<A, never, Effect.Transaction> => TxRef.get(self.ref)
+export const get = <A>(self: TxSubscriptionRef<A>): Effect.Effect<A> => TxRef.get(self.ref)
 
 // =============================================================================
 // Mutations
@@ -134,7 +137,8 @@ export const get = <A>(self: TxSubscriptionRef<A>): Effect.Effect<A, never, Effe
  * Modifies the value of the TxSubscriptionRef using a function that returns both a
  * result and the new value. The new value is published to all subscribers atomically.
  *
- * @example
+ * **Example** (Modifying and returning a value)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -146,36 +150,37 @@ export const get = <A>(self: TxSubscriptionRef<A>): Effect.Effect<A, never, Effe
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const modify: {
   <A, B>(
     f: (current: A) => [returnValue: B, newValue: A]
-  ): (self: TxSubscriptionRef<A>) => Effect.Effect<B, never, Effect.Transaction>
+  ): (self: TxSubscriptionRef<A>) => Effect.Effect<B>
   <A, B>(
     self: TxSubscriptionRef<A>,
     f: (current: A) => [returnValue: B, newValue: A]
-  ): Effect.Effect<B, never, Effect.Transaction>
+  ): Effect.Effect<B>
 } = dual(
   2,
   <A, B>(
     self: TxSubscriptionRef<A>,
     f: (current: A) => [returnValue: B, newValue: A]
-  ): Effect.Effect<B, never, Effect.Transaction> =>
+  ): Effect.Effect<B> =>
     Effect.gen(function*() {
       const current = yield* TxRef.get(self.ref)
       const [returnValue, newValue] = f(current)
       yield* TxRef.set(self.ref, newValue)
       yield* TxPubSub.publish(self.pubsub, newValue)
       return returnValue
-    })
+    }).pipe(Effect.tx)
 )
 
 /**
  * Sets the value of the TxSubscriptionRef and publishes the new value to all subscribers.
  *
- * @example
+ * **Example** (Setting a new value)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -186,23 +191,23 @@ export const modify: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const set: {
-  <A>(value: A): (self: TxSubscriptionRef<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<void, never, Effect.Transaction>
+  <A>(value: A): (self: TxSubscriptionRef<A>) => Effect.Effect<void>
+  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<void, never, Effect.Transaction> =>
-    modify(self, () => [void 0, value])
+  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<void> => modify(self, () => [void 0, value])
 )
 
 /**
  * Updates the value of the TxSubscriptionRef using a function and publishes the new
  * value to all subscribers.
  *
- * @example
+ * **Example** (Updating a value)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -213,15 +218,15 @@ export const set: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const update: {
-  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<void, never, Effect.Transaction>
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<void, never, Effect.Transaction>
+  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<void>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<void>
 } = dual(
   2,
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<void, never, Effect.Transaction> =>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<void> =>
     modify(self, (current) => [void 0, f(current)])
 )
 
@@ -229,7 +234,8 @@ export const update: {
  * Gets the current value and sets a new value atomically. Publishes the new value
  * to all subscribers.
  *
- * @example
+ * **Example** (Getting and setting atomically)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -241,23 +247,23 @@ export const update: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const getAndSet: {
-  <A>(value: A): (self: TxSubscriptionRef<A>) => Effect.Effect<A, never, Effect.Transaction>
-  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<A, never, Effect.Transaction>
+  <A>(value: A): (self: TxSubscriptionRef<A>) => Effect.Effect<A>
+  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<A>
 } = dual(
   2,
-  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<A, never, Effect.Transaction> =>
-    modify(self, (current) => [current, value])
+  <A>(self: TxSubscriptionRef<A>, value: A): Effect.Effect<A> => modify(self, (current) => [current, value])
 )
 
 /**
  * Gets the current value and updates it using a function atomically. Publishes
  * the new value to all subscribers.
  *
- * @example
+ * **Example** (Getting and updating atomically)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -269,15 +275,15 @@ export const getAndSet: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const getAndUpdate: {
-  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<A, never, Effect.Transaction>
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A, never, Effect.Transaction>
+  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<A>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A>
 } = dual(
   2,
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A, never, Effect.Transaction> =>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A> =>
     modify(self, (current) => [current, f(current)])
 )
 
@@ -285,7 +291,8 @@ export const getAndUpdate: {
  * Updates the value using a function and returns the new value. Publishes the
  * new value to all subscribers.
  *
- * @example
+ * **Example** (Updating and reading atomically)
+ *
  * ```ts
  * import { Effect, TxSubscriptionRef } from "effect"
  *
@@ -296,15 +303,15 @@ export const getAndUpdate: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category mutations
+ * @since 3.10.0
  */
 export const updateAndGet: {
-  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<A, never, Effect.Transaction>
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A, never, Effect.Transaction>
+  <A>(f: (current: A) => A): (self: TxSubscriptionRef<A>) => Effect.Effect<A>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A>
 } = dual(
   2,
-  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A, never, Effect.Transaction> =>
+  <A>(self: TxSubscriptionRef<A>, f: (current: A) => A): Effect.Effect<A> =>
     modify(self, (current) => {
       const newValue = f(current)
       return [newValue, newValue]
@@ -319,9 +326,10 @@ export const updateAndGet: {
  * Subscribes to all changes of the TxSubscriptionRef. Returns a scoped TxDequeue
  * that first yields the current value, then every subsequent update.
  *
- * @example
+ * **Example** (Subscribing to changes)
+ *
  * ```ts
- * import { Effect, TxSubscriptionRef, TxQueue } from "effect"
+ * import { Effect, TxQueue, TxSubscriptionRef } from "effect"
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* TxSubscriptionRef.make(0)
@@ -340,14 +348,14 @@ export const updateAndGet: {
  * })
  * ```
  *
- * @since 4.0.0
  * @category subscriptions
+ * @since 3.10.0
  */
 export const changes = <A>(
   self: TxSubscriptionRef<A>
 ): Effect.Effect<TxQueue.TxQueue<A>, never, Scope.Scope> =>
   Effect.acquireRelease(
-    Effect.transaction(
+    Effect.tx(
       Effect.gen(function*() {
         const sub = yield* TxPubSub.acquireSubscriber(self.pubsub)
         const current = yield* TxRef.get(self.ref)
@@ -355,14 +363,15 @@ export const changes = <A>(
         return sub
       })
     ),
-    (queue) => Effect.transaction(TxPubSub.releaseSubscriber(self.pubsub, queue))
+    (queue) => Effect.tx(TxPubSub.releaseSubscriber(self.pubsub, queue))
   )
 
 /**
  * Returns a Stream of all changes to the TxSubscriptionRef, starting with the
  * current value followed by every subsequent update.
  *
- * @example
+ * **Example** (Streaming changes)
+ *
  * ```ts
  * import { Effect, Stream, TxSubscriptionRef } from "effect"
  *
@@ -378,14 +387,14 @@ export const changes = <A>(
  * })
  * ```
  *
- * @since 4.0.0
  * @category subscriptions
+ * @since 3.10.0
  */
 export const changesStream = <A>(self: TxSubscriptionRef<A>): Stream.Stream<A, never, never> =>
   Stream.unwrap(
     Effect.map(
       changes(self),
-      (sub) => Stream.fromEffectRepeat(Effect.transaction(TxQueue.take(sub)))
+      (sub) => Stream.fromEffectRepeat(Effect.tx(TxQueue.take(sub)))
     )
   )
 
@@ -396,7 +405,8 @@ export const changesStream = <A>(self: TxSubscriptionRef<A>): Stream.Stream<A, n
 /**
  * Checks if the given value is a TxSubscriptionRef.
  *
- * @example
+ * **Example** (Checking transactional subscription references)
+ *
  * ```ts
  * import { TxSubscriptionRef } from "effect"
  *
@@ -407,7 +417,7 @@ export const changesStream = <A>(self: TxSubscriptionRef<A>): Stream.Stream<A, n
  * }
  * ```
  *
- * @since 4.0.0
  * @category guards
+ * @since 4.0.0
  */
 export const isTxSubscriptionRef = (u: unknown): u is TxSubscriptionRef<unknown> => hasProperty(u, TypeId)

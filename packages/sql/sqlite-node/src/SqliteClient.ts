@@ -1,9 +1,24 @@
 /**
- * @since 1.0.0
+ * Node.js SQLite client implementation for Effect SQL, backed by `better-sqlite3`.
+ *
+ * This module exposes constructors and layers for providing both the SQLite-specific `SqliteClient`
+ * service and the generic `SqlClient` service. It is intended for file-backed or in-memory SQLite
+ * databases in Node applications, local development tools, tests, migrations, and embedded
+ * persistence use cases that need Effect SQL query compilation plus SQLite-specific operations such
+ * as exporting a database, creating backups, or loading native SQLite extensions.
+ *
+ * Each client owns one scoped `better-sqlite3` connection and serializes access through it. WAL mode
+ * is enabled by default, so set `disableWAL` when opening read-only databases or when the database
+ * location cannot change journal mode. Prepared statements are cached by SQL text, safe integer
+ * handling follows the `SqlClient` fiber-local setting, `executeStream` is not implemented, and
+ * SQLite does not support `updateValues`.
+ *
+ * @since 4.0.0
  */
 import Sqlite from "better-sqlite3"
 import * as Cache from "effect/Cache"
 import * as Config from "effect/Config"
+import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -11,31 +26,39 @@ import { identity } from "effect/Function"
 import * as Layer from "effect/Layer"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import * as ServiceMap from "effect/ServiceMap"
 import * as Stream from "effect/Stream"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
 import type { Connection } from "effect/unstable/sql/SqlConnection"
-import { SqlError } from "effect/unstable/sql/SqlError"
+import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import * as Statement from "effect/unstable/sql/Statement"
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name"
 
+const classifyError = (cause: unknown, message: string, operation: string) =>
+  classifySqliteError(cause, { message, operation })
+
 /**
- * @category type ids
- * @since 1.0.0
+ * Runtime type identifier used to mark Node `SqliteClient` values.
+ *
+ * @category type IDs
+ * @since 4.0.0
  */
 export const TypeId: TypeId = "~@effect/sql-sqlite-node/SqliteClient"
 
 /**
- * @category type ids
- * @since 1.0.0
+ * Type-level identifier used to mark Node `SqliteClient` values.
+ *
+ * @category type IDs
+ * @since 4.0.0
  */
 export type TypeId = "~@effect/sql-sqlite-node/SqliteClient"
 
 /**
+ * Node SQLite client service, extending `SqlClient` with database export, backup, and extension loading helpers. `updateValues` is not supported.
+ *
  * @category models
- * @since 1.0.0
+ * @since 4.0.0
  */
 export interface SqliteClient extends Client.SqlClient {
   readonly [TypeId]: TypeId
@@ -49,8 +72,10 @@ export interface SqliteClient extends Client.SqlClient {
 }
 
 /**
+ * Metadata returned from a Node SQLite backup operation, reporting total and remaining page counts.
+ *
  * @category models
- * @since 1.0.0
+ * @since 4.0.0
  */
 export interface BackupMetadata {
   readonly totalPages: number
@@ -58,14 +83,18 @@ export interface BackupMetadata {
 }
 
 /**
+ * Context service tag for the node SQLite client implementation.
+ *
  * @category tags
- * @since 1.0.0
+ * @since 4.0.0
  */
-export const SqliteClient = ServiceMap.Service<SqliteClient>("@effect/sql-sqlite-node/SqliteClient")
+export const SqliteClient = Context.Service<SqliteClient>("@effect/sql-sqlite-node/SqliteClient")
 
 /**
+ * Configuration for a node SQLite client backed by `better-sqlite3`, including the database filename, read-only mode, statement cache settings, WAL behavior, span attributes, and query/result name transforms.
+ *
  * @category models
- * @since 1.0.0
+ * @since 4.0.0
  */
 export interface SqliteClientConfig {
   readonly filename: string
@@ -86,8 +115,10 @@ interface SqliteConnection extends Connection {
 }
 
 /**
- * @category constructor
- * @since 1.0.0
+ * Creates a scoped node SQLite client from the supplied configuration, using a single serialized connection with WAL enabled by default and exposing SQLite-specific `export`, `backup`, and `loadExtension` operations.
+ *
+ * @category constructors
+ * @since 4.0.0
  */
 export const make = (
   options: SqliteClientConfig
@@ -117,7 +148,7 @@ export const make = (
         lookup: (sql: string) =>
           Effect.try({
             try: () => db.prepare(sql),
-            catch: (cause) => new SqlError({ cause, message: "Failed to prepare statement " })
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to prepare statement", "prepare") })
           })
       })
 
@@ -127,7 +158,7 @@ export const make = (
         raw: boolean
       ) =>
         Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
-          if (ServiceMap.get(fiber.services, Client.SafeIntegers)) {
+          if (Context.get(fiber.context, Client.SafeIntegers)) {
             statement.safeIntegers(true)
           }
           try {
@@ -137,7 +168,7 @@ export const make = (
             const result = statement.run(...params)
             return Effect.succeed(raw ? result as unknown as ReadonlyArray<any> : [])
           } catch (cause) {
-            return Effect.fail(new SqlError({ cause, message: "Failed to execute statement" }))
+            return Effect.fail(new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") }))
           }
         })
 
@@ -169,7 +200,7 @@ export const make = (
                 statement.run(...params)
                 return []
               },
-              catch: (cause) => new SqlError({ cause, message: "Failed to execute statement" })
+              catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
             }),
           (statement) => Effect.sync(() => statement.reader && statement.raw(false))
         )
@@ -195,18 +226,19 @@ export const make = (
         },
         export: Effect.try({
           try: () => db.serialize(),
-          catch: (cause) => new SqlError({ cause, message: "Failed to export database" })
+          catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to export database", "export") })
         }),
         backup(destination) {
           return Effect.tryPromise({
             try: () => db.backup(destination),
-            catch: (cause) => new SqlError({ cause, message: "Failed to backup database" })
+            catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to backup database", "backup") })
           })
         },
         loadExtension(path) {
           return Effect.try({
             try: () => db.loadExtension(path),
-            catch: (cause) => new SqlError({ cause, message: "Failed to load extension" })
+            catch: (cause) =>
+              new SqlError({ reason: classifyError(cause, "Failed to load extension", "loadExtension") })
           })
         }
       })
@@ -218,7 +250,7 @@ export const make = (
     const acquirer = semaphore.withPermits(1)(Effect.succeed(connection))
     const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
       const fiber = Fiber.getCurrent()!
-      const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope)
+      const scope = Context.getUnsafe(fiber.context, Scope.Scope)
       return Effect.as(
         Effect.tap(
           restore(semaphore.take(1)),
@@ -250,33 +282,37 @@ export const make = (
   })
 
 /**
+ * Builds a layer from an Effect `Config` value, providing both the node `SqliteClient` service and the generic `SqlClient` service.
+ *
  * @category layers
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const layerConfig = (
   config: Config.Wrap<SqliteClientConfig>
 ): Layer.Layer<SqliteClient | Client.SqlClient, Config.ConfigError> =>
-  Layer.effectServices(
-    Config.unwrap(config).asEffect().pipe(
+  Layer.effectContext(
+    Config.unwrap(config).pipe(
       Effect.flatMap(make),
       Effect.map((client) =>
-        ServiceMap.make(SqliteClient, client).pipe(
-          ServiceMap.add(Client.SqlClient, client)
+        Context.make(SqliteClient, client).pipe(
+          Context.add(Client.SqlClient, client)
         )
       )
     )
   ).pipe(Layer.provide(Reactivity.layer))
 
 /**
+ * Builds a layer from a node SQLite client configuration, providing both `SqliteClient` and the generic `SqlClient` service.
+ *
  * @category layers
- * @since 1.0.0
+ * @since 4.0.0
  */
 export const layer = (
   config: SqliteClientConfig
 ): Layer.Layer<SqliteClient | Client.SqlClient> =>
-  Layer.effectServices(
+  Layer.effectContext(
     Effect.map(make(config), (client) =>
-      ServiceMap.make(SqliteClient, client).pipe(
-        ServiceMap.add(Client.SqlClient, client)
+      Context.make(SqliteClient, client).pipe(
+        Context.add(Client.SqlClient, client)
       ))
   ).pipe(Layer.provide(Reactivity.layer))

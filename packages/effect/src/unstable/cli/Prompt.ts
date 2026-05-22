@@ -1,4 +1,28 @@
 /**
+ * The `Prompt` module provides composable, effectful building blocks for
+ * interactive command-line questions. A `Prompt<A>` describes terminal UI that
+ * renders frames, reads keyboard input, validates responses, and eventually
+ * produces a value of type `A`.
+ *
+ * **Common tasks**
+ *
+ * - Ask for text, password, hidden, list, confirm, toggle, number, or date input
+ * - Let users choose from select, autocomplete, multi-select, and file prompts
+ * - Combine prompts with {@link all}, {@link map}, and {@link flatMap}
+ * - Build specialized prompts with {@link custom}
+ * - Run a prompt against the current terminal with {@link run}
+ *
+ * **Gotchas**
+ *
+ * - Prompts require terminal services and may fail with `Terminal.QuitError`
+ *   when input ends or the prompt is quit
+ * - Rendering is frame-based: custom prompts must return ANSI output from
+ *   `render` and matching ANSI clearing output from `clear`
+ * - Choices and file lists are paged by `maxPerPage`, so keyboard navigation
+ *   and filtering should account for hidden off-page entries
+ * - `password` and `hidden` return `Redacted` values; unwrap them only at the
+ *   boundary where the secret is needed
+ *
  * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
@@ -6,13 +30,12 @@ import type { NoSuchElementError } from "../../Cause.ts"
 import type * as Cause from "../../Cause.ts"
 import * as Data from "../../Data.ts"
 import * as Effect from "../../Effect.ts"
+import * as Effectable from "../../Effectable.ts"
 import * as FileSystem from "../../FileSystem.ts"
 import { dual, pipe } from "../../Function.ts"
-import { YieldableProto } from "../../internal/core.ts"
 import * as EffectNumber from "../../Number.ts"
 import * as Option from "../../Option.ts"
 import * as Path from "../../Path.ts"
-import * as Pipeable from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Queue from "../../Queue.ts"
 import * as Redacted from "../../Redacted.ts"
@@ -24,28 +47,36 @@ import type * as Primitive from "./Primitive.ts"
 const TypeId = "~effect/cli/Prompt"
 
 /**
- * @since 4.0.0
+ * Represents an interactive terminal prompt that produces an `Output` value.
+ *
+ * **Details**
+ *
+ * A `Prompt` is an `Effect` that may fail with `Terminal.QuitError` and
+ * requires the prompt environment needed to render frames, read input, and
+ * access files or paths when a prompt uses them.
+ *
  * @category models
+ * @since 4.0.0
  */
-export interface Prompt<Output>
-  extends Pipeable.Pipeable, Effect.Yieldable<Prompt<Output>, Output, Terminal.QuitError, Environment>
-{
+export interface Prompt<Output> extends Effect.Effect<Output, Terminal.QuitError, Environment> {
   readonly [TypeId]: {
     readonly _Output: Covariant<Output>
   }
 }
 
 /**
- * @since 4.0.0
+ * Returns `true` if the provided value is a `Prompt`.
+ *
  * @category guards
+ * @since 4.0.0
  */
 export const isPrompt = (u: unknown): u is Prompt<unknown> => Predicate.hasProperty(u, TypeId)
 
 /**
  * Represents the services available to a custom `Prompt`.
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
 export type Environment = FileSystem.FileSystem | Path.Path | Terminal.Terminal
 
@@ -53,8 +84,8 @@ export type Environment = FileSystem.FileSystem | Path.Path | Terminal.Terminal
  * Represents the action that should be taken by a `Prompt` based upon the
  * user input received during the current frame.
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
 export type Action<State, Output> = Data.TaggedEnum<{
   readonly Beep: {}
@@ -63,34 +94,34 @@ export type Action<State, Output> = Data.TaggedEnum<{
 }>
 
 /**
- * Represents the definition of an `Action`.
+ * Type-level definition for the tagged `Prompt.Action` variants.
  *
- * Required to create a `Data.TaggedEnum` with generic type arguments.
+ * **Details**
  *
- * @since 4.0.0
+ * It connects the action state and output type parameters to the `Beep`,
+ * `NextFrame`, and `Submit` action cases.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface ActionDefinition extends Data.TaggedEnum.WithGenerics<2> {
   readonly taggedEnum: Action<this["A"], this["B"]>
 }
 
 /**
- * Represents the set of handlers used by a `Prompt` to:
+ * Represents the set of handlers used by a `Prompt`.
  *
- *   - Render the current frame of the prompt
- *   - Process user input and determine the next `Prompt.Action` to take
- *   - Clear the terminal screen before the next frame
+ * **Details**
  *
- * @since 4.0.0
+ * The handlers render the current frame, process user input into the next
+ * `Prompt.Action`, and clear the terminal screen before the next frame.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface Handlers<State, Output> {
   /**
    * A function that is called to render the current frame of the `Prompt`.
-   *
-   * @param state The current state of the prompt.
-   * @param action The `Prompt.Action` for the current frame.
-   * @returns An ANSI escape code sequence to display in the terminal screen.
    */
   readonly render: (
     state: State,
@@ -99,10 +130,6 @@ export interface Handlers<State, Output> {
   /**
    * A function that is called to process user input and determine the next
    * `Prompt.Action` that should be taken.
-   *
-   * @param input The input the user provided for the current frame.
-   * @param state The current state of the prompt.
-   * @returns The next `Prompt.Action` that should be taken.
    */
   readonly process: (
     input: Terminal.UserInput,
@@ -111,10 +138,6 @@ export interface Handlers<State, Output> {
   /**
    * A function that is called to clear the terminal screen before rendering
    * the next frame of the `Prompt`.
-   *
-   * @param action The `Prompt.Action` for the current frame.
-   * @param columns The current number of columns available in the `Terminal`.
-   * @returns An ANSI escape code sequence used to clear the terminal screen.
    */
   readonly clear: (
     state: State,
@@ -123,8 +146,11 @@ export interface Handlers<State, Output> {
 }
 
 /**
- * @since 4.0.0
+ * Options for a confirmation prompt that asks the user to choose a boolean
+ * yes/no value.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface ConfirmOptions {
   /**
@@ -166,8 +192,11 @@ export interface ConfirmOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for a date prompt, including the displayed message, initial value,
+ * format mask, validation, and locale labels.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface DateOptions {
   /**
@@ -238,8 +267,11 @@ export interface DateOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for an integer prompt, including bounds, keyboard step sizes, and
+ * additional validation.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface IntegerOptions {
   /**
@@ -272,8 +304,15 @@ export interface IntegerOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for a floating-point number prompt.
+ *
+ * **Details**
+ *
+ * In addition to the numeric bounds and step settings from `IntegerOptions`,
+ * the prompt can be configured with a display precision.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface FloatOptions extends IntegerOptions {
   /**
@@ -283,8 +322,11 @@ export interface FloatOptions extends IntegerOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for a text prompt that returns a list of strings by splitting the
+ * input on a delimiter.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface ListOptions extends TextOptions {
   /**
@@ -294,46 +336,47 @@ export interface ListOptions extends TextOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for a file-system selection prompt.
+ *
+ * **Details**
+ *
+ * They control which path type can be selected, the starting directory, paging,
+ * and filtering of displayed entries.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface FileOptions {
   /**
-   * The path type that will be selected.
-   *
-   * Defaults to `"file"`.
+   * The path type that will be selected, defaulting to `"file"`.
    */
   readonly type?: Primitive.PathType
   /**
-   * The message to display in the prompt.
-   *
-   * Defaults to `"Choose a file"`.
+   * The message to display in the prompt, defaulting to `"Choose a file"`.
    */
   readonly message?: string
   /**
-   * Where the user will initially be prompted to select files from.
-   *
-   * Defaults to the current working directory.
+   * Where the user will initially be prompted to select files from, defaulting
+   * to the current working directory.
    */
   readonly startingPath?: string
   /**
-   * The number of choices to display at one time
-   *
-   * Defaults to `10`.
+   * The number of choices to display at one time, defaulting to `10`.
    */
   readonly maxPerPage?: number
   /**
-   * A function which removes any file from the prompt display where the
-   * specified predicate returns `true`.
-   *
-   * Defaults to returning all files.
+   * A predicate or effect that keeps a file in the prompt when it returns
+   * `true`, defaulting to returning all files.
    */
   readonly filter?: (file: string) => boolean | Effect.Effect<boolean, never, Environment>
 }
 
 /**
- * @since 4.0.0
+ * Options for a prompt that asks the user to select one value from a list of
+ * choices.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface SelectOptions<A> {
   /**
@@ -351,8 +394,11 @@ export interface SelectOptions<A> {
 }
 
 /**
- * @since 4.0.0
+ * Options for an autocomplete prompt that lets the user filter selectable
+ * choices by typing.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface AutoCompleteOptions<A> extends SelectOptions<A> {
   /**
@@ -370,8 +416,11 @@ export interface AutoCompleteOptions<A> extends SelectOptions<A> {
 }
 
 /**
- * @since 4.0.0
+ * Options for a multi-select prompt, including bulk-selection labels and
+ * minimum or maximum selection counts.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface MultiSelectOptions {
   /**
@@ -397,8 +446,11 @@ export interface MultiSelectOptions {
 }
 
 /**
- * @since 4.0.0
+ * Represents one choice displayed by select, autocomplete, and multi-select
+ * prompts.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface SelectChoice<A> {
   /**
@@ -425,8 +477,11 @@ export interface SelectChoice<A> {
 }
 
 /**
- * @since 4.0.0
+ * Options for text-entry prompts, including the displayed message, default
+ * text, and effectful validation before submission.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface TextOptions {
   /**
@@ -445,8 +500,11 @@ export interface TextOptions {
 }
 
 /**
- * @since 4.0.0
+ * Options for a toggle prompt that lets the user switch between active and
+ * inactive boolean states.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface ToggleOptions {
   /**
@@ -510,22 +568,37 @@ export const platformFigures = Effect.map(
 )
 
 /**
- * @since 4.0.0
+ * Type alias for any `Prompt`, regardless of its output type.
+ *
  * @category utility types
+ * @since 4.0.0
  */
 export type Any = Prompt<unknown>
 
 /**
+ * Namespace containing return-type helpers for `Prompt.all`.
+ *
  * @since 4.0.0
  */
 export declare namespace All {
   /**
+   * Computes the prompt returned by `Prompt.all` for an iterable of prompts.
+   *
+   * **Details**
+   *
+   * The resulting prompt produces an array of each prompt's output value.
+   *
+   * @category utility types
    * @since 4.0.0
    */
   export type ReturnIterable<T extends Iterable<Any>> = [T] extends [Iterable<Prompt<infer A>>] ? Prompt<Array<A>>
     : never
 
   /**
+   * Computes the prompt returned by `Prompt.all` for a readonly tuple or array
+   * of prompts, preserving tuple positions in the output type.
+   *
+   * @category utility types
    * @since 4.0.0
    */
   export type ReturnTuple<T extends ReadonlyArray<unknown>> = Prompt<
@@ -534,6 +607,10 @@ export declare namespace All {
   > extends infer X ? X : never
 
   /**
+   * Computes the prompt returned by `Prompt.all` for a record of prompts,
+   * preserving the record keys and replacing each prompt with its output type.
+   *
+   * @category utility types
    * @since 4.0.0
    */
   export type ReturnObject<T> = [T] extends [{ [K: string]: Any }] ? Prompt<
@@ -544,6 +621,10 @@ export declare namespace All {
     : never
 
   /**
+   * Computes the return prompt type for `Prompt.all` based on the input
+   * structure.
+   *
+   * @category constructors
    * @since 4.0.0
    */
   export type Return<
@@ -558,10 +639,12 @@ export declare namespace All {
  * Runs all the provided prompts in sequence respecting the structure provided
  * in input.
  *
+ * **Details**
+ *
  * Supports either a tuple / iterable of prompts or a record / struct of prompts
  * as an argument.
  *
- * **Example**
+ * **Example** (Collecting prompt results)
  *
  * ```ts
  * import { Effect } from "effect"
@@ -584,8 +667,8 @@ export declare namespace All {
  * const allWithRecord = Prompt.all({ username, password })
  * ```
  *
- * @since 4.0.0
  * @category collecting & elements
+ * @since 4.0.0
  */
 export const all: <
   const Arg extends Iterable<Prompt<any>> | Record<string, Prompt<any>>
@@ -622,8 +705,11 @@ const annotateLine = (line: string): string => Ansi.annotate(line, Ansi.bold)
 const annotateErrorLine = (line: string): string => Ansi.annotate(line, Ansi.combine(Ansi.italicized, Ansi.red))
 
 /**
- * @since 4.0.0
+ * Creates a confirmation prompt that asks the user to choose a boolean yes/no
+ * value.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const confirm = (options: ConfirmOptions): Prompt<boolean> => {
   const opts: Required<ConfirmOptions> = {
@@ -651,29 +737,18 @@ export const confirm = (options: ConfirmOptions): Prompt<boolean> => {
 /**
  * Creates a custom `Prompt` from the specified initial state and handlers.
  *
+ * **Details**
+ *
  * The initial state can either be a pure value or an `Effect`. This is
  * particularly useful when the initial state of the `Prompt` must be computed
- * by performing some effectful computation, such as reading data from the file
- * system.
+ * by performing an effectful computation, such as reading data from the file
+ * system. A `Prompt` runs as a render loop: `render` returns ANSI output for
+ * the current frame, the `Terminal` obtains user input, `process` returns the
+ * next prompt action, and `clear` returns ANSI output used to clear the previous
+ * frame.
  *
- * A `Prompt` is essentially a render loop where user input triggers a new frame
- * to be rendered to the `Terminal`. The `handlers` of a custom prompt are used
- * to control what is rendered to the `Terminal` each frame. During each frame,
- * the following occurs:
- *
- *   1. The `render` handler is called with this frame's prompt state and prompt
- *      action and returns an ANSI escape string to be rendered to the
- *      `Terminal`
- *   2. The `Terminal` obtains input from the user
- *   3. The `process` handler is called with the input obtained from the user
- *      and this frame's prompt state and returns the next prompt action that
- *      should be performed
- *   4. The `clear` handler is called with this frame's prompt state and prompt
- *      action and returns an ANSI escape string used to clear the screen of
- *      the `Terminal`
- *
- * @since 4.0.0
  * @category constructors
+ * @since 4.0.0
  */
 export const custom = <State, Output>(
   initialState: State | Effect.Effect<State, never, Environment>,
@@ -689,8 +764,11 @@ export const custom = <State, Output>(
 }
 
 /**
- * @since 4.0.0
+ * Creates a date prompt that lets the user edit a formatted date value and
+ * validates the final `Date` before submission.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const date = (options: DateOptions): Prompt<Date> => {
   const opts: Required<DateOptions> = {
@@ -710,7 +788,7 @@ export const date = (options: DateOptions): Prompt<Date> => {
     typed: "",
     cursor: initialCursorPosition,
     value: opts.initial,
-    error: undefined
+    error: Option.none()
   }
   return custom(initialState, {
     render: handleDateRender(opts),
@@ -720,14 +798,21 @@ export const date = (options: DateOptions): Prompt<Date> => {
 }
 
 /**
- * @since 4.0.0
+ * Creates a file-system selection prompt and returns the selected path.
+ *
+ * **Details**
+ *
+ * The prompt can be configured to select files, directories, or either path
+ * type.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const file = (options: FileOptions = {}): Prompt<string> => {
   const opts: FileOptionsReq = {
     type: options.type ?? "file",
     message: options.message ?? `Choose a file`,
-    startingPath: options.startingPath,
+    startingPath: Option.fromUndefinedOr(options.startingPath),
     maxPerPage: options.maxPerPage ?? 10,
     filter: options.filter ?? (() => Effect.succeed(true))
   }
@@ -736,10 +821,10 @@ export const file = (options: FileOptions = {}): Prompt<string> => {
     never,
     Environment
   > = Effect.gen(function*() {
-    const currentPath = yield* resolveCurrentPath(undefined, opts)
+    const currentPath = yield* resolveCurrentPath(Option.none(), opts)
     const files = yield* getFileList(currentPath, opts)
     const confirm = Confirm.Hide()
-    return { cursor: 0, files, path: undefined, confirm }
+    return { cursor: 0, files, allFiles: files, query: "", path: Option.none(), confirm }
   })
   return custom(initialState, {
     render: handleFileRender(opts),
@@ -749,8 +834,11 @@ export const file = (options: FileOptions = {}): Prompt<string> => {
 }
 
 /**
- * @since 4.0.0
+ * Sequences prompts by using the output of this prompt to create the next
+ * prompt.
+ *
  * @category combinators
+ * @since 4.0.0
  */
 export const flatMap: {
   <Output, Output2>(
@@ -772,8 +860,15 @@ export const flatMap: {
 })
 
 /**
- * @since 4.0.0
+ * Creates a floating-point number prompt.
+ *
+ * **Details**
+ *
+ * The prompt supports minimum and maximum bounds, keyboard step sizes, display
+ * precision, and additional validation before submission.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const float = (options: FloatOptions): Prompt<number> => {
   const opts: FloatOptionsReq = {
@@ -796,7 +891,7 @@ export const float = (options: FloatOptions): Prompt<number> => {
   const initialState: NumberState = {
     cursor: 0,
     value: "",
-    error: undefined
+    error: Option.none()
   }
   return custom(initialState, {
     render: handleRenderFloat(opts),
@@ -805,16 +900,26 @@ export const float = (options: FloatOptions): Prompt<number> => {
   })
 }
 /**
- * @since 4.0.0
+ * Creates a text prompt that does not echo typed input and returns the
+ * submitted value wrapped in `Redacted`.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const hidden = (
   options: TextOptions
 ): Prompt<Redacted.Redacted> => basePrompt(options, "hidden").pipe(map(Redacted.make))
 
 /**
- * @since 4.0.0
+ * Creates an integer prompt.
+ *
+ * **Details**
+ *
+ * The prompt supports minimum and maximum bounds, keyboard step sizes, and
+ * additional validation before submission.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const integer = (options: IntegerOptions): Prompt<number> => {
   const opts: IntegerOptionsReq = {
@@ -836,7 +941,7 @@ export const integer = (options: IntegerOptions): Prompt<number> => {
   const initialState: NumberState = {
     cursor: 0,
     value: "",
-    error: undefined
+    error: Option.none()
   }
   return custom(initialState, {
     render: handleRenderInteger(opts),
@@ -846,8 +951,11 @@ export const integer = (options: IntegerOptions): Prompt<number> => {
 }
 
 /**
- * @since 4.0.0
+ * Creates a text prompt that returns an array of strings by splitting the
+ * submitted input on the configured delimiter.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const list = (options: ListOptions): Prompt<Array<string>> =>
   text(options).pipe(
@@ -855,8 +963,10 @@ export const list = (options: ListOptions): Prompt<Array<string>> =>
   )
 
 /**
- * @since 4.0.0
+ * Transforms the output value produced by a prompt.
+ *
  * @category combinators
+ * @since 4.0.0
  */
 export const map: {
   <Output, Output2>(
@@ -872,18 +982,27 @@ export const map: {
 ) => flatMap(self, (a) => succeed(f(a))))
 
 /**
- * @since 4.0.0
+ * Creates a password prompt that masks typed input and returns the submitted
+ * value wrapped in `Redacted`.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const password = (
   options: TextOptions
 ): Prompt<Redacted.Redacted> => basePrompt(options, "password").pipe(map(Redacted.make))
 
 /**
- * Executes the specified `Prompt`.
+ * Runs a prompt by reading terminal input and rendering prompt frames until the
+ * prompt submits a value.
  *
- * @since 4.0.0
+ * **Gotchas**
+ *
+ * The returned effect may fail with `Terminal.QuitError` if terminal input ends
+ * or the prompt is quit.
+ *
  * @category execution
+ * @since 4.0.0
  */
 export const run: <Output>(
   self: Prompt<Output>
@@ -920,8 +1039,15 @@ const getSelectInitialIndex = <A>(choices: ReadonlyArray<SelectChoice<A>>): numb
 }
 
 /**
- * @since 4.0.0
+ * Creates a prompt that lets the user select a single value from a list of
+ * choices.
+ *
+ * **Gotchas**
+ *
+ * At most one choice may be marked as selected by default.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const select = <const A>(options: SelectOptions<A>): Prompt<A> => {
   const opts: SelectOptionsReq<A> = {
@@ -939,7 +1065,7 @@ export const select = <const A>(options: SelectOptions<A>): Prompt<A> => {
 /**
  * Creates a prompt that lets users filter select choices by typing.
  *
- * **Example**
+ * **Example** (Filtering choices with autocomplete)
  *
  * ```ts
  * import { Prompt } from "effect/unstable/cli"
@@ -954,8 +1080,8 @@ export const select = <const A>(options: SelectOptions<A>): Prompt<A> => {
  * })
  * ```
  *
- * @since 4.0.0
  * @category constructors
+ * @since 4.0.0
  */
 export const autoComplete = <const A>(options: AutoCompleteOptions<A>): Prompt<A> => {
   const opts: AutoCompleteOptionsReq<A> = {
@@ -985,8 +1111,16 @@ export const autoComplete = <const A>(options: AutoCompleteOptions<A>): Prompt<A
 }
 
 /**
- * @since 4.0.0
+ * Creates a prompt that lets the user select multiple choices and returns their
+ * values as an array.
+ *
+ * **Details**
+ *
+ * The prompt supports default selected choices, bulk-selection commands, and
+ * minimum or maximum selection counts.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const multiSelect = <const A>(
   options: SelectOptions<A> & MultiSelectOptions
@@ -1003,7 +1137,7 @@ export const multiSelect = <const A>(
       initialSelected.add(i)
     }
   }
-  const initialState: MultiSelectState = { index: 0, selectedIndices: initialSelected, error: undefined }
+  const initialState: MultiSelectState = { index: 0, selectedIndices: initialSelected, error: Option.none() }
   return custom(initialState, {
     render: handleMultiSelectRender(opts),
     process: handleMultiSelectProcess(opts),
@@ -1014,11 +1148,13 @@ export const multiSelect = <const A>(
 /**
  * Creates a `Prompt` which immediately succeeds with the specified value.
  *
- * **NOTE**: This method will not attempt to obtain user input or render
- * anything to the screen.
+ * **Details**
  *
- * @since 4.0.0
+ * This prompt does not attempt to obtain user input or render anything to the
+ * screen.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const succeed = <A>(value: A): Prompt<A> => {
   const op = Object.create(proto)
@@ -1028,16 +1164,22 @@ export const succeed = <A>(value: A): Prompt<A> => {
 }
 
 /**
- * @since 4.0.0
+ * Creates a text-entry prompt that echoes input and returns the submitted
+ * string after validation.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const text = (
   options: TextOptions
 ): Prompt<string> => basePrompt(options, "text")
 
 /**
- * @since 4.0.0
+ * Creates a toggle prompt that lets the user switch between active and inactive
+ * states and returns the selected boolean value.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const toggle = (options: ToggleOptions): Prompt<boolean> => {
   const opts: ToggleOptionsReq = {
@@ -1054,15 +1196,14 @@ export const toggle = (options: ToggleOptions): Prompt<boolean> => {
 }
 
 const proto = {
-  ...YieldableProto,
+  ...Effectable.Prototype<Prompt<any>>({
+    label: "Prompt",
+    evaluate() {
+      return run(this)
+    }
+  }),
   [TypeId]: {
     _Output: (_: never) => _
-  },
-  asEffect(): Effect.Effect<unknown, Terminal.QuitError, Environment> {
-    return run(this as any)
-  },
-  pipe() {
-    return Pipeable.pipeArguments(this, arguments)
   }
 }
 
@@ -1283,7 +1424,7 @@ const TRUE_VALUE_REGEXP = /^y|t$/
 const FALSE_VALUE_REGEXP = /^n|f$/
 
 const handleConfirmProcess = (input: Terminal.UserInput, defaultValue: boolean) => {
-  const value = input.input ?? ""
+  const value = Option.getOrElse(input.input, () => "")
   if (input.key.name === "enter" || input.key.name === "return") {
     return Effect.succeed(Action.Submit({ value: defaultValue }))
   }
@@ -1303,7 +1444,7 @@ interface DateState {
   readonly cursor: number
   readonly value: globalThis.Date
   readonly dateParts: ReadonlyArray<DatePart>
-  readonly error: string | undefined
+  readonly error: Option.Option<string>
 }
 
 const handleDateClear = (options: DateOptionsReq) => {
@@ -1314,8 +1455,8 @@ const handleDateClear = (options: DateOptionsReq) => {
     const resetCurrentLine = Ansi.eraseLine + Ansi.cursorLeft
     const parts = Arr.reduce(state.dateParts, "", (doc, part) => doc + part.toString())
     const promptText = renderDateOutput("?", figures.pointerSmall, parts, options, { plain: true })
-    const errorText = state.error !== undefined
-      ? Arr.match(state.error.split(NEWLINE_REGEXP), {
+    const errorText = Option.isSome(state.error)
+      ? Arr.match(state.error.value.split(NEWLINE_REGEXP), {
         onEmpty: () => "",
         onNonEmpty: (errorLines) => `${figures.pointerSmall} ${errorLines.join("\n")}`
       })
@@ -1326,8 +1467,8 @@ const handleDateClear = (options: DateOptionsReq) => {
 }
 
 const renderDateError = (state: DateState, pointer: string): string => {
-  if (state.error !== undefined) {
-    const errorLines = state.error.split(NEWLINE_REGEXP)
+  if (Option.isSome(state.error)) {
+    const errorLines = state.error.value.split(NEWLINE_REGEXP)
     if (Arr.isReadonlyArrayNonEmpty(errorLines)) {
       const prefix = Ansi.annotate(pointer, Ansi.red) + " "
       const lines = Arr.map(errorLines, (str) => annotateErrorLine(str))
@@ -1395,12 +1536,12 @@ const processDown = (state: DateState) => {
 
 const processDateCursorLeft = (state: DateState) => {
   const previous = state.dateParts[state.cursor].previousPart()
-  if (previous !== undefined) {
+  if (Option.isSome(previous)) {
     return Action.NextFrame({
       state: {
         ...state,
         typed: "",
-        cursor: state.dateParts.indexOf(previous)
+        cursor: state.dateParts.indexOf(previous.value)
       }
     })
   }
@@ -1409,12 +1550,12 @@ const processDateCursorLeft = (state: DateState) => {
 
 const processDateCursorRight = (state: DateState) => {
   const next = state.dateParts[state.cursor].nextPart()
-  if (next !== undefined) {
+  if (Option.isSome(next)) {
     return Action.NextFrame({
       state: {
         ...state,
         typed: "",
-        cursor: state.dateParts.indexOf(next)
+        cursor: state.dateParts.indexOf(next.value)
       }
     })
   }
@@ -1423,9 +1564,10 @@ const processDateCursorRight = (state: DateState) => {
 
 const processDateNext = (state: DateState) => {
   const next = state.dateParts[state.cursor].nextPart()
-  const cursor = next !== undefined
-    ? state.dateParts.indexOf(next)
-    : state.dateParts.findIndex((part) => !part.isToken())
+  const cursor = Option.match(next, {
+    onNone: () => state.dateParts.findIndex((part) => !part.isToken()),
+    onSome: (next) => state.dateParts.indexOf(next)
+  })
   return Action.NextFrame({
     state: { ...state, cursor }
   })
@@ -1499,14 +1641,14 @@ const handleDateProcess = (options: DateOptionsReq) => {
             Action.NextFrame({
               state: {
                 ...state,
-                error
+                error: Option.some(error)
               }
             }),
           onSuccess: (value) => Action.Submit({ value })
         })
       }
       default: {
-        return Effect.succeed(defaultDateProcessor(input.input ?? "", state))
+        return Effect.succeed(defaultDateProcessor(Option.getOrElse(input.input, () => ""), state))
       }
     }
   }
@@ -1603,23 +1745,20 @@ abstract class DatePart {
   /**
    * Retrieves the next date part in the list of parts.
    */
-  nextPart(): DatePart | undefined {
-    const currentPartIndex = Arr.findFirstIndex(this.parts, (part) => part === this) ?? 0
-    return Option.getOrUndefined(
-      Arr.findFirst(this.parts.slice(currentPartIndex + 1), (part) => !part.isToken())
-    )
+  nextPart(): Option.Option<DatePart> {
+    const currentPartIndex = Option.getOrElse(Arr.findFirstIndex(this.parts, (part) => part === this), () => 0)
+    return Arr.findFirst(this.parts.slice(currentPartIndex + 1), (part) => !part.isToken())
   }
 
   /**
    * Retrieves the previous date part in the list of parts.
    */
-  previousPart(): DatePart | undefined {
+  previousPart(): Option.Option<DatePart> {
     const currentPartIndex = Arr.findFirstIndex(this.parts, (part) => part === this)
-    if (currentPartIndex !== undefined) {
-      return Option.getOrUndefined(
-        Arr.findLast(this.parts.slice(0, currentPartIndex), (part) => !part.isToken())
-      )
+    if (Option.isSome(currentPartIndex)) {
+      return Arr.findLast(this.parts.slice(0, currentPartIndex.value), (part) => !part.isToken())
     }
+    return Option.none()
   }
 
   toString() {
@@ -1845,17 +1984,22 @@ class Meridiem extends DatePart {
 }
 
 interface FileOptionsReq extends Required<Omit<FileOptions, "startingPath">> {
-  readonly startingPath: string | undefined
+  readonly startingPath: Option.Option<string>
 }
 
 interface FileState {
   readonly cursor: number
   readonly files: ReadonlyArray<string>
-  readonly path: string | undefined
+  readonly allFiles: ReadonlyArray<string>
+  readonly query: string
+  readonly path: Option.Option<string>
   readonly confirm: Confirm
 }
 
 const CONFIRM_MESSAGE = "The selected directory contains files. Would you like to traverse the selected directory?"
+const FILE_FILTER_LABEL = "filter"
+const FILE_FILTER_PLACEHOLDER = "type to filter"
+const FILE_EMPTY_MESSAGE = "No matches"
 type Confirm = Data.TaggedEnum<{
   readonly Show: {}
   readonly Hide: {}
@@ -1865,15 +2009,15 @@ const Confirm = Data.taggedEnum<Confirm>()
 const showConfirmation = Confirm.$is("Show")
 
 const resolveCurrentPath = (
-  path: string | undefined,
+  path: Option.Option<string>,
   options: FileOptionsReq
 ): Effect.Effect<string, never, FileSystem.FileSystem> => {
-  if (path !== undefined) {
-    return Effect.succeed(path)
+  if (Option.isSome(path)) {
+    return Effect.succeed(path.value)
   }
-  const startingPath = options.startingPath
-  if (startingPath !== undefined) {
-    return Effect.flatMap(FileSystem.FileSystem.asEffect(), (fs) =>
+  if (Option.isSome(options.startingPath)) {
+    const startingPath = options.startingPath.value
+    return Effect.flatMap(FileSystem.FileSystem, (fs) =>
       // Ensure the user provided starting path exists
       Effect.orDie(fs.exists(startingPath)).pipe(
         Effect.flatMap((exists) =>
@@ -1910,6 +2054,40 @@ const getFileList = Effect.fnUntraced(function*(directory: string, options: File
   }, { concurrency: files.length })
 })
 
+const filterFiles = (files: ReadonlyArray<string>, query: string) => {
+  if (query.length === 0) {
+    return files
+  }
+  const normalizedQuery = query.toLowerCase()
+  const filtered: Array<string> = []
+  for (let index = 0; index < files.length; index++) {
+    if (files[index].toLowerCase().includes(normalizedQuery)) {
+      filtered.push(files[index])
+    }
+  }
+  return filtered
+}
+
+const updateFileState = (
+  state: FileState,
+  query: string,
+  allFiles: ReadonlyArray<string> = state.allFiles
+): FileState => {
+  const files = filterFiles(allFiles, query)
+  if (files.length === 0) {
+    return { ...state, query, allFiles, files, cursor: 0 }
+  }
+  const selected = state.files[state.cursor]
+  const cursor = selected === undefined ? 0 : files.indexOf(selected)
+  return {
+    ...state,
+    query,
+    allFiles,
+    files,
+    cursor: cursor === -1 ? 0 : cursor
+  }
+}
+
 const handleFileClear = (options: FileOptionsReq) => {
   return Effect.fnUntraced(function*(state: FileState, _: Action<FileState, string>) {
     const terminal = yield* Terminal.Terminal
@@ -1918,12 +2096,14 @@ const handleFileClear = (options: FileOptionsReq) => {
     const figures = yield* platformFigures
     const currentPath = yield* resolveCurrentPath(state.path, options)
     const selectedPath = state.files[state.cursor]
-    const resolvedPath = path.resolve(currentPath, selectedPath)
+    const resolvedPath = selectedPath === undefined ? currentPath : path.resolve(currentPath, selectedPath)
     const resolvedPathText = `${figures.pointerSmall} ${resolvedPath}`
     const isConfirming = showConfirmation(state.confirm)
     const promptText = isConfirming
       ? renderPrompt("(Y/n)", CONFIRM_MESSAGE, "?", figures.pointerSmall, { plain: true })
-      : renderPrompt("", options.message, figures.tick, figures.ellipsis, { plain: true })
+      : renderPrompt(renderFileFilter(state, { plain: true }), options.message, figures.tick, figures.ellipsis, {
+        plain: true
+      })
     const filesText = isConfirming
       ? ""
       : renderFiles(state, state.files, figures, options, { plain: true })
@@ -1991,6 +2171,17 @@ const renderFileName = (file: string, isSelected: boolean, renderOptions?: Rende
     : file
 }
 
+const renderFileFilter = (state: FileState, renderOptions?: RenderOptions | undefined) => {
+  const filterValue = state.query.length === 0
+    ? renderOptions?.plain === true
+      ? FILE_FILTER_PLACEHOLDER
+      : Ansi.annotate(FILE_FILTER_PLACEHOLDER, Ansi.blackBright)
+    : renderOptions?.plain === true
+    ? state.query
+    : Ansi.annotate(state.query, Ansi.combine(Ansi.underlined, Ansi.cyanBright))
+  return `[${FILE_FILTER_LABEL}: ${filterValue}]`
+}
+
 const renderFiles = (
   state: FileState,
   files: ReadonlyArray<string>,
@@ -1999,6 +2190,11 @@ const renderFiles = (
   renderOptions?: RenderOptions | undefined
 ) => {
   const length = files.length
+  if (length === 0) {
+    return renderOptions?.plain === true
+      ? FILE_EMPTY_MESSAGE
+      : Ansi.annotate(FILE_EMPTY_MESSAGE, Ansi.blackBright)
+  }
   const toDisplay = entriesToDisplay(state.cursor, length, options.maxPerPage)
   const documents: Array<string> = []
   for (let index = toDisplay.startIndex; index < toDisplay.endIndex; index++) {
@@ -2015,7 +2211,7 @@ const renderFileNextFrame = Effect.fnUntraced(function*(state: FileState, option
   const figures = yield* platformFigures
   const currentPath = yield* resolveCurrentPath(state.path, options)
   const selectedPath = state.files[state.cursor]
-  const resolvedPath = path.resolve(currentPath, selectedPath)
+  const resolvedPath = selectedPath === undefined ? currentPath : path.resolve(currentPath, selectedPath)
   const resolvedPathMsg = Ansi.annotate(figures.pointerSmall + " " + resolvedPath, Ansi.blackBright)
 
   if (showConfirmation(state.confirm)) {
@@ -2027,33 +2223,36 @@ const renderFileNextFrame = Effect.fnUntraced(function*(state: FileState, option
   }
   const leadingSymbol = Ansi.annotate(figures.tick, Ansi.green)
   const trailingSymbol = Ansi.annotate(figures.ellipsis, Ansi.blackBright)
-  const promptMsg = renderPrompt("", options.message, leadingSymbol, trailingSymbol)
+  const promptMsg = renderPrompt(renderFileFilter(state), options.message, leadingSymbol, trailingSymbol)
   const files = renderFiles(state, state.files, figures, options)
   return Ansi.cursorHide + promptMsg + "\n" + resolvedPathMsg + "\n" + files
 })
 
-const renderFileSubmission = Effect.fnUntraced(function*(value: string, options: FileOptionsReq) {
+const renderFileSubmission = Effect.fnUntraced(function*(state: FileState, value: string, options: FileOptionsReq) {
   const figures = yield* platformFigures
   const leadingSymbol = Ansi.annotate(figures.tick, Ansi.green)
   const trailingSymbol = Ansi.annotate(figures.ellipsis, Ansi.blackBright)
-  const promptMsg = renderPrompt("", options.message, leadingSymbol, trailingSymbol)
+  const promptMsg = renderPrompt(renderFileFilter(state), options.message, leadingSymbol, trailingSymbol)
   return promptMsg + " " + Ansi.annotate(value, Ansi.white) + "\n"
 })
 
 const handleFileRender = (options: FileOptionsReq) => {
   return (
-    _: FileState,
+    state: FileState,
     action: Action<FileState, string>
   ): Effect.Effect<string, never, Path.Path | FileSystem.FileSystem> => {
     return Action.$match(action, {
       Beep: () => Effect.succeed(renderBeep),
       NextFrame: ({ state }) => renderFileNextFrame(state, options),
-      Submit: ({ value }) => renderFileSubmission(value, options)
+      Submit: ({ value }) => renderFileSubmission(state, value, options)
     })
   }
 }
 
 const processFileCursorUp = (state: FileState) => {
+  if (state.files.length === 0) {
+    return Effect.succeed(Action.Beep())
+  }
   const cursor = state.cursor - 1
   return Effect.succeed(Action.NextFrame({
     state: { ...state, cursor: cursor < 0 ? state.files.length - 1 : cursor }
@@ -2061,12 +2260,36 @@ const processFileCursorUp = (state: FileState) => {
 }
 
 const processFileCursorDown = (state: FileState) => {
+  if (state.files.length === 0) {
+    return Effect.succeed(Action.Beep())
+  }
   return Effect.succeed(Action.NextFrame({
     state: { ...state, cursor: (state.cursor + 1) % state.files.length }
   }))
 }
 
+const processFileBackspace = (state: FileState) => {
+  if (state.query.length === 0) {
+    return Effect.succeed(Action.Beep())
+  }
+  const query = state.query.slice(0, state.query.length - 1)
+  return Effect.succeed(Action.NextFrame({ state: updateFileState(state, query) }))
+}
+
+const processFileClear = (state: FileState) => Effect.succeed(Action.NextFrame({ state: updateFileState(state, "") }))
+
+const processFileInput = (input: string, state: FileState) => {
+  if (input.length === 0) {
+    return Effect.succeed(Action.Beep())
+  }
+  const query = state.query + input
+  return Effect.succeed(Action.NextFrame({ state: updateFileState(state, query) }))
+}
+
 const processSelection = Effect.fnUntraced(function*(state: FileState, options: FileOptionsReq) {
+  if (state.files.length === 0) {
+    return Action.Beep()
+  }
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const currentPath = yield* resolveCurrentPath(state.path, options)
@@ -2093,7 +2316,9 @@ const processSelection = Effect.fnUntraced(function*(state: FileState, options: 
       state: {
         cursor: 0,
         files,
-        path: resolvedPath,
+        allFiles: files,
+        query: "",
+        path: Option.some(resolvedPath),
         confirm: Confirm.Hide()
       }
     })
@@ -2103,6 +2328,15 @@ const processSelection = Effect.fnUntraced(function*(state: FileState, options: 
 
 const handleFileProcess = (options: FileOptionsReq) => {
   return Effect.fnUntraced(function*(input: Terminal.UserInput, state: FileState) {
+    if (input.key.ctrl) {
+      if (input.key.name === "u") {
+        if (showConfirmation(state.confirm)) {
+          return Action.Beep()
+        }
+        return yield* processFileClear(state)
+      }
+      return Action.Beep()
+    }
     switch (input.key.name) {
       case "k":
       case "up": {
@@ -2112,6 +2346,12 @@ const handleFileProcess = (options: FileOptionsReq) => {
       case "down":
       case "tab": {
         return yield* processFileCursorDown(state)
+      }
+      case "backspace": {
+        if (showConfirmation(state.confirm)) {
+          return Action.Beep()
+        }
+        return yield* processFileBackspace(state)
       }
       case "enter":
       case "return": {
@@ -2129,12 +2369,14 @@ const handleFileProcess = (options: FileOptionsReq) => {
             state: {
               cursor: 0,
               files,
-              path: resolvedPath,
+              allFiles: files,
+              query: "",
+              path: Option.some(resolvedPath),
               confirm: Confirm.Hide()
             }
           })
         }
-        return Action.Beep()
+        return yield* processFileInput(Option.getOrElse(input.input, () => ""), state)
       }
       case "n":
       case "f": {
@@ -2145,10 +2387,13 @@ const handleFileProcess = (options: FileOptionsReq) => {
           const resolvedPath = path.resolve(currentPath, selectedPath)
           return Action.Submit({ value: resolvedPath })
         }
-        return Action.Beep()
+        return yield* processFileInput(Option.getOrElse(input.input, () => ""), state)
       }
       default: {
-        return Action.Beep()
+        if (showConfirmation(state.confirm)) {
+          return Action.Beep()
+        }
+        return yield* processFileInput(Option.getOrElse(input.input, () => ""), state)
       }
     }
   })
@@ -2160,7 +2405,7 @@ interface MultiSelectOptionsReq extends MultiSelectOptions {}
 type MultiSelectState = {
   index: number
   selectedIndices: Set<number>
-  error: string | undefined
+  error: Option.Option<string>
 }
 
 const renderMultiSelectError = (
@@ -2168,8 +2413,8 @@ const renderMultiSelectError = (
   pointer: string,
   renderOptions?: RenderOptions | undefined
 ): string => {
-  if (state.error !== undefined) {
-    return Arr.match(state.error.split(NEWLINE_REGEXP), {
+  if (Option.isSome(state.error)) {
+    return Arr.match(state.error.value.split(NEWLINE_REGEXP), {
       onEmpty: () => "",
       onNonEmpty: (errorLines) => {
         if (renderOptions?.plain === true) {
@@ -2198,6 +2443,17 @@ const renderChoiceDescription = <A>(
 }
 
 const metaOptionsCount = 2
+
+const renderMultiSelectTitle = (
+  title: string,
+  isHighlighted: boolean,
+  renderOptions?: RenderOptions | undefined
+) => {
+  if (renderOptions?.plain === true || !isHighlighted) {
+    return title
+  }
+  return Ansi.annotate(title, Ansi.combine(Ansi.underlined, Ansi.cyanBright))
+}
 
 const renderMultiSelectChoices = <A>(
   state: MultiSelectState,
@@ -2234,9 +2490,7 @@ const renderMultiSelectChoices = <A>(
     }
     if (index < metaOptions.length) {
       // Meta options
-      const title = isHighlighted && renderOptions?.plain !== true
-        ? Ansi.annotate(choice.title, Ansi.cyanBright)
-        : choice.title
+      const title = renderMultiSelectTitle(choice.title, isHighlighted, renderOptions)
       documents.push(prefix + " " + title)
     } else {
       // Regular choices
@@ -2246,7 +2500,7 @@ const renderMultiSelectChoices = <A>(
       const annotatedCheckbox = isHighlighted && renderOptions?.plain !== true
         ? Ansi.annotate(checkbox, Ansi.cyanBright)
         : checkbox
-      const title = choice.title
+      const title = renderMultiSelectTitle(choice.title, isHighlighted, renderOptions)
       const description = renderChoiceDescription(choice as SelectChoice<A>, isHighlighted, renderOptions)
       documents.push(prefix + " " + annotatedCheckbox + " " + title + " " + description)
     }
@@ -2341,12 +2595,12 @@ const handleMultiSelectProcess = <A>(options: SelectOptionsReq<A> & MultiSelectO
     switch (input.key.name) {
       case "k":
       case "up": {
-        return processMultiSelectCursorUp({ ...state, error: undefined }, totalChoices)
+        return processMultiSelectCursorUp({ ...state, error: Option.none() }, totalChoices)
       }
       case "j":
       case "down":
       case "tab": {
-        return processMultiSelectCursorDown({ ...state, error: undefined }, totalChoices)
+        return processMultiSelectCursorDown({ ...state, error: Option.none() }, totalChoices)
       }
       case "space": {
         return processSpace(state, options)
@@ -2356,12 +2610,12 @@ const handleMultiSelectProcess = <A>(options: SelectOptionsReq<A> & MultiSelectO
         const selectedCount = state.selectedIndices.size
         if (options.min !== undefined && selectedCount < options.min) {
           return Effect.succeed(
-            Action.NextFrame({ state: { ...state, error: `At least ${options.min} are required` } })
+            Action.NextFrame({ state: { ...state, error: Option.some(`At least ${options.min} are required`) } })
           )
         }
         if (options.max !== undefined && selectedCount > options.max) {
           return Effect.succeed(
-            Action.NextFrame({ state: { ...state, error: `At most ${options.max} choices are allowed` } })
+            Action.NextFrame({ state: { ...state, error: Option.some(`At most ${options.max} choices are allowed`) } })
           )
         }
         const selectedValues = Array.from(state.selectedIndices).sort(EffectNumber.Order).map((index) =>
@@ -2392,7 +2646,7 @@ interface FloatOptionsReq extends Required<FloatOptions> {}
 interface NumberState {
   readonly cursor: number
   readonly value: string
-  readonly error: string | undefined
+  readonly error: Option.Option<string>
 }
 
 const handleNumberClear = (options: IntegerOptionsReq) => {
@@ -2417,7 +2671,7 @@ const renderNumberInput = (
   if (submitted || renderOptions?.plain === true) {
     return value
   }
-  const annotation = state.error !== undefined ?
+  const annotation = Option.isSome(state.error) ?
     Ansi.red :
     Ansi.combine(Ansi.underlined, Ansi.cyanBright)
   return Ansi.annotate(value, annotation)
@@ -2428,8 +2682,8 @@ const renderNumberError = (
   pointer: string,
   renderOptions?: RenderOptions | undefined
 ) => {
-  if (state.error !== undefined) {
-    return Arr.match(state.error.split(NEWLINE_REGEXP), {
+  if (Option.isSome(state.error)) {
+    return Arr.match(state.error.value.split(NEWLINE_REGEXP), {
       onEmpty: () => "",
       onNonEmpty: (errorLines) => {
         if (renderOptions?.plain === true) {
@@ -2479,19 +2733,19 @@ const processNumberBackspace = (state: NumberState) => {
   }
   const value = state.value.slice(0, state.value.length - 1)
   return Effect.succeed(Action.NextFrame({
-    state: { ...state, value, error: undefined }
+    state: { ...state, value, error: Option.none() }
   }))
 }
 
 const processNumberClear = (state: NumberState) =>
   Effect.succeed(Action.NextFrame({
-    state: { ...state, cursor: 0, value: "", error: undefined }
+    state: { ...state, cursor: 0, value: "", error: Option.none() }
   }))
 
 const defaultIntProcessor = (input: string, state: NumberState) => {
   if (state.value.length === 0 && input === "-") {
     return Effect.succeed(Action.NextFrame({
-      state: { ...state, value: "-", error: undefined }
+      state: { ...state, value: "-", error: Option.none() }
     }))
   }
 
@@ -2500,7 +2754,7 @@ const defaultIntProcessor = (input: string, state: NumberState) => {
     return Effect.succeed(Action.Beep())
   } else {
     return Effect.succeed(Action.NextFrame({
-      state: { ...state, value: `${parsed}`, error: undefined }
+      state: { ...state, value: `${parsed}`, error: Option.none() }
     }))
   }
 }
@@ -2511,7 +2765,7 @@ const defaultFloatProcessor = (input: string, state: NumberState) => {
   }
   if (state.value.length === 0 && input === "-") {
     return Effect.succeed(Action.NextFrame({
-      state: { ...state, value: "-", error: undefined }
+      state: { ...state, value: "-", error: Option.none() }
     }))
   }
 
@@ -2523,7 +2777,7 @@ const defaultFloatProcessor = (input: string, state: NumberState) => {
       state: {
         ...state,
         value: input === "." ? `${parsed}.` : `${parsed}`,
-        error: undefined
+        error: Option.none()
       }
     }))
   }
@@ -2556,7 +2810,7 @@ const handleProcessInteger = (options: IntegerOptionsReq) => {
             value: state.value === "" || state.value === "-"
               ? `${options.incrementBy}`
               : `${Number.parseInt(state.value) + options.incrementBy}`,
-            error: undefined
+            error: Option.none()
           }
         }))
       }
@@ -2568,7 +2822,7 @@ const handleProcessInteger = (options: IntegerOptionsReq) => {
             value: state.value === "" || state.value === "-"
               ? `-${options.decrementBy}`
               : `${Number.parseInt(state.value) - options.decrementBy}`,
-            error: undefined
+            error: Option.none()
           }
         }))
       }
@@ -2579,7 +2833,7 @@ const handleProcessInteger = (options: IntegerOptionsReq) => {
           return Effect.succeed(Action.NextFrame({
             state: {
               ...state,
-              error: "Must provide an integer value"
+              error: Option.some("Must provide an integer value")
             }
           }))
         } else {
@@ -2588,7 +2842,7 @@ const handleProcessInteger = (options: IntegerOptionsReq) => {
               Action.NextFrame({
                 state: {
                   ...state,
-                  error
+                  error: Option.some(error)
                 }
               }),
             onSuccess: (value) => Action.Submit({ value })
@@ -2596,7 +2850,7 @@ const handleProcessInteger = (options: IntegerOptionsReq) => {
         }
       }
       default: {
-        return defaultIntProcessor(input.input ?? "", state)
+        return defaultIntProcessor(Option.getOrElse(input.input, () => ""), state)
       }
     }
   }
@@ -2629,7 +2883,7 @@ const handleProcessFloat = (options: FloatOptionsReq) => {
             value: state.value === "" || state.value === "-"
               ? `${options.incrementBy}`
               : `${Number.parseFloat(state.value) + options.incrementBy}`,
-            error: undefined
+            error: Option.none()
           }
         }))
       }
@@ -2641,7 +2895,7 @@ const handleProcessFloat = (options: FloatOptionsReq) => {
             value: state.value === "" || state.value === "-"
               ? `-${options.decrementBy}`
               : `${Number.parseFloat(state.value) - options.decrementBy}`,
-            error: undefined
+            error: Option.none()
           }
         }))
       }
@@ -2652,7 +2906,7 @@ const handleProcessFloat = (options: FloatOptionsReq) => {
           return Effect.succeed(Action.NextFrame({
             state: {
               ...state,
-              error: "Must provide a floating point value"
+              error: Option.some("Must provide a floating point value")
             }
           }))
         } else {
@@ -2664,7 +2918,7 @@ const handleProcessFloat = (options: FloatOptionsReq) => {
                   Action.NextFrame({
                     state: {
                       ...state,
-                      error
+                      error: Option.some(error)
                     }
                   }),
                 onSuccess: (value) => Action.Submit({ value })
@@ -2673,7 +2927,7 @@ const handleProcessFloat = (options: FloatOptionsReq) => {
         }
       }
       default: {
-        return defaultFloatProcessor(input.input ?? "", state)
+        return defaultFloatProcessor(Option.getOrElse(input.input, () => ""), state)
       }
     }
   }
@@ -2717,7 +2971,7 @@ const updateAutoCompleteState = <A>(
 }
 
 const autoCompleteCursor = (state: AutoCompleteState) =>
-  Arr.findFirstIndex(state.filtered, (index) => index === state.index) ?? 0
+  Option.getOrElse(Arr.findFirstIndex(state.filtered, (index) => index === state.index), () => 0)
 
 const renderSelectOutput = <A>(
   leadingSymbol: string,
@@ -3053,8 +3307,11 @@ const handleSelectProcess = <A>(options: SelectOptionsReq<A>) => {
 
 const handleAutoCompleteProcess = <A>(options: AutoCompleteOptionsReq<A>) => {
   return (input: Terminal.UserInput, state: AutoCompleteState) => {
-    if (input.key.ctrl && input.key.name === "u") {
-      return processAutoCompleteClear(state, options)
+    if (input.key.ctrl) {
+      if (input.key.name === "u") {
+        return processAutoCompleteClear(state, options)
+      }
+      return Effect.succeed(Action.Beep())
     }
     switch (input.key.name) {
       case "k":
@@ -3083,7 +3340,7 @@ const handleAutoCompleteProcess = <A>(options: AutoCompleteOptionsReq<A>) => {
         return Effect.succeed(Action.Submit({ value: selected.value }))
       }
       default: {
-        return processAutoCompleteInput(input.input ?? "", state, options)
+        return processAutoCompleteInput(Option.getOrElse(input.input, () => ""), state, options)
       }
     }
   }
@@ -3099,7 +3356,7 @@ interface TextOptionsReq extends Required<TextOptions> {
 interface TextState {
   readonly cursor: number
   readonly value: string
-  readonly error: string | undefined
+  readonly error: Option.Option<string>
 }
 
 const renderClearScreen = Effect.fnUntraced(function*(state: TextState, options: TextOptionsReq) {
@@ -3137,7 +3394,7 @@ const renderTextInput = (
     }
   }
 
-  const annotation = nextState.error !== undefined ?
+  const annotation = Option.isSome(nextState.error) ?
     Ansi.red
     : submitted ?
     Ansi.white
@@ -3163,8 +3420,8 @@ const renderTextError = (
   pointer: string,
   renderOptions?: RenderOptions | undefined
 ): string => {
-  if (nextState.error !== undefined) {
-    return Arr.match(nextState.error.split(NEWLINE_REGEXP), {
+  if (Option.isSome(nextState.error)) {
+    return Arr.match(nextState.error.value.split(NEWLINE_REGEXP), {
       onEmpty: () => "",
       onNonEmpty: (errorLines) => {
         if (renderOptions?.plain === true) {
@@ -3219,7 +3476,7 @@ const processTextBackspace = (state: TextState) => {
   const value = `${beforeCursor}${afterCursor}`
   return Effect.succeed(
     Action.NextFrame({
-      state: { ...state, cursor, value, error: undefined }
+      state: { ...state, cursor, value, error: Option.none() }
     })
   )
 }
@@ -3227,7 +3484,7 @@ const processTextBackspace = (state: TextState) => {
 const processTextClear = (state: TextState) =>
   Effect.succeed(
     Action.NextFrame({
-      state: { ...state, cursor: 0, value: "", error: undefined }
+      state: { ...state, cursor: 0, value: "", error: Option.none() }
     })
   )
 
@@ -3238,7 +3495,7 @@ const processTextCursorLeft = (state: TextState) => {
   const cursor = state.cursor - 1
   return Effect.succeed(
     Action.NextFrame({
-      state: { ...state, cursor, error: undefined }
+      state: { ...state, cursor, error: Option.none() }
     })
   )
 }
@@ -3250,10 +3507,24 @@ const processTextCursorRight = (state: TextState) => {
   const cursor = Math.min(state.cursor + 1, state.value.length)
   return Effect.succeed(
     Action.NextFrame({
-      state: { ...state, cursor, error: undefined }
+      state: { ...state, cursor, error: Option.none() }
     })
   )
 }
+
+const processTextCursorStart = (state: TextState) =>
+  Effect.succeed(
+    Action.NextFrame({
+      state: { ...state, cursor: 0, error: Option.none() }
+    })
+  )
+
+const processTextCursorEnd = (state: TextState) =>
+  Effect.succeed(
+    Action.NextFrame({
+      state: { ...state, cursor: state.value.length, error: Option.none() }
+    })
+  )
 
 const processTab = (state: TextState, options: TextOptionsReq) => {
   if (state.value === options.default) {
@@ -3262,7 +3533,7 @@ const processTab = (state: TextState, options: TextOptionsReq) => {
   const value = state.value.length === 0 ? options.default : state.value
   return Effect.succeed(
     Action.NextFrame({
-      state: { ...state, value, cursor: value.length, error: undefined }
+      state: { ...state, value, cursor: value.length, error: Option.none() }
     })
   )
 }
@@ -3274,7 +3545,7 @@ const defaultTextProcessor = (input: string, state: TextState) => {
   const cursor = state.cursor + input.length
   return Effect.succeed(
     Action.NextFrame({
-      state: { ...state, cursor, value, error: undefined }
+      state: { ...state, cursor, value, error: Option.none() }
     })
   )
 }
@@ -3291,8 +3562,21 @@ const handleTextRender = (options: TextOptionsReq) => {
 
 const handleTextProcess = (options: TextOptionsReq) => {
   return (input: Terminal.UserInput, state: TextState) => {
-    if (input.key.ctrl && input.key.name === "u") {
-      return processTextClear(state)
+    if (input.key.ctrl) {
+      switch (input.key.name) {
+        case "u": {
+          return processTextClear(state)
+        }
+        case "a": {
+          return processTextCursorStart(state)
+        }
+        case "e": {
+          return processTextCursorEnd(state)
+        }
+        default: {
+          return Effect.succeed(Action.Beep())
+        }
+      }
     }
     switch (input.key.name) {
       case "backspace": {
@@ -3304,13 +3588,19 @@ const handleTextProcess = (options: TextOptionsReq) => {
       case "right": {
         return processTextCursorRight(state)
       }
+      case "home": {
+        return processTextCursorStart(state)
+      }
+      case "end": {
+        return processTextCursorEnd(state)
+      }
       case "enter":
       case "return": {
         const value = state.value
         return Effect.match(options.validate(value), {
           onFailure: (error) =>
             Action.NextFrame({
-              state: { ...state, value, error }
+              state: { ...state, value, error: Option.some(error) }
             }),
           onSuccess: (value) => Action.Submit({ value })
         })
@@ -3319,7 +3609,7 @@ const handleTextProcess = (options: TextOptionsReq) => {
         return processTab(state, options)
       }
       default: {
-        return defaultTextProcessor(input.input ?? "", state)
+        return defaultTextProcessor(Option.getOrElse(input.input, () => ""), state)
       }
     }
   }
@@ -3345,7 +3635,7 @@ const basePrompt = (
   const initialState: TextState = {
     cursor: opts.default.length,
     value: opts.default,
-    error: undefined
+    error: Option.none()
   }
   return custom(initialState, {
     render: handleTextRender(opts),

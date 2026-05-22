@@ -1,13 +1,51 @@
 /**
+ * The `HttpApiError` module defines the built-in error types used by Effect's
+ * unstable HTTP API layer for common failure responses.
+ *
+ * Each exported status error is a `Schema.ErrorClass` with an `httpApiStatus`
+ * annotation, so it can be declared as an endpoint or middleware error schema
+ * and then used by reflection, OpenAPI generation, clients, and server response
+ * encoding. The classes also implement `HttpServerRespondable`, which means
+ * using one directly as a server response produces an empty response with the
+ * matching HTTP status.
+ *
+ * Use the `*NoContent` variants when the wire response intentionally has no
+ * body but clients should still decode that status into a typed error value.
+ * For custom error schemas, make sure to add the intended
+ * `HttpApiSchema.status` annotation; error schemas without one are treated as
+ * `500 Internal Server Error` by the HTTP API machinery. Schema failures raised
+ * while decoding params, headers, query, body, or payload values are represented
+ * separately by `HttpApiSchemaError`, which responds as `400 Bad Request` unless
+ * transformed by middleware.
+ *
  * @since 4.0.0
  */
+import * as Data from "../../Data.ts"
+import * as Effect from "../../Effect.ts"
 import * as ErrorReporter from "../../ErrorReporter.ts"
-import { identity } from "../../Function.ts"
+import { hasProperty } from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
-import * as Transformation from "../../SchemaTransformation.ts"
+import * as HttpServerRespondable from "../http/HttpServerRespondable.ts"
+import * as HttpServerResponse from "../http/HttpServerResponse.ts"
 import * as HttpApiSchema from "./HttpApiSchema.ts"
 
+const badRequestResponse = HttpServerResponse.empty({ status: 400 })
+const unauthorizedResponse = HttpServerResponse.empty({ status: 401 })
+const forbiddenResponse = HttpServerResponse.empty({ status: 403 })
+const notFoundResponse = HttpServerResponse.empty({ status: 404 })
+const methodNotAllowedResponse = HttpServerResponse.empty({ status: 405 })
+const notAcceptableResponse = HttpServerResponse.empty({ status: 406 })
+const requestTimeoutResponse = HttpServerResponse.empty({ status: 408 })
+const conflictResponse = HttpServerResponse.empty({ status: 409 })
+const goneResponse = HttpServerResponse.empty({ status: 410 })
+const internalServerErrorResponse = HttpServerResponse.empty({ status: 500 })
+const notImplementedResponse = HttpServerResponse.empty({ status: 501 })
+const serviceUnavailableResponse = HttpServerResponse.empty({ status: 503 })
+
 /**
+ * Built-in HTTP API error for a `400 Bad Request` response. When used directly as
+ * a server response, it renders as an empty response with status 400.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -17,11 +55,17 @@ export class BadRequest extends Schema.ErrorClass<BadRequest>("effect/HttpApiErr
   description: "BadRequest",
   httpApiStatus: 400
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(badRequestResponse)
+  }
   static readonly singleton = new BadRequest()
 }
 
 /**
+ * No-content schema variant for `BadRequest`, decoding an empty 400 response into
+ * a `BadRequest` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -30,26 +74,9 @@ export const BadRequestNoContent = BadRequest.pipe(HttpApiSchema.asNoContent({
 }))
 
 /**
- * @category Built-in errors
- * @since 4.0.0
- */
-export const BadRequestFromSchemaError = BadRequest.pipe(
-  Schema.decodeTo(
-    Schema.Union([Schema.declare(Schema.isSchemaError), BadRequest]),
-    Transformation.transform({
-      encode: (_) => BadRequest.singleton,
-      decode: identity
-    })
-  ),
-  HttpApiSchema.asNoContent({
-    decode: () => new BadRequest({})
-  })
-).annotate({
-  httpApiStatus: 400,
-  description: "BadRequest"
-})
-
-/**
+ * Built-in HTTP API error for a `401 Unauthorized` response. When used directly as
+ * a server response, it renders as an empty response with status 401.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -59,10 +86,16 @@ export class Unauthorized extends Schema.ErrorClass<Unauthorized>("effect/HttpAp
   description: "Unauthorized",
   httpApiStatus: 401
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(unauthorizedResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `Unauthorized`, decoding an empty 401 response
+ * into an `Unauthorized` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -71,6 +104,9 @@ export const UnauthorizedNoContent = Unauthorized.pipe(HttpApiSchema.asNoContent
 }))
 
 /**
+ * Built-in HTTP API error for a `403 Forbidden` response. When used directly as a
+ * server response, it renders as an empty response with status 403.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -80,10 +116,16 @@ export class Forbidden extends Schema.ErrorClass<Forbidden>("effect/HttpApiError
   description: "Forbidden",
   httpApiStatus: 403
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(forbiddenResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `Forbidden`, decoding an empty 403 response into a
+ * `Forbidden` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -92,6 +134,9 @@ export const ForbiddenNoContent = Forbidden.pipe(HttpApiSchema.asNoContent({
 }))
 
 /**
+ * Built-in HTTP API error for a `404 Not Found` response. When used directly as a
+ * server response, it renders as an empty response with status 404.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -101,10 +146,16 @@ export class NotFound extends Schema.ErrorClass<NotFound>("effect/HttpApiError/N
   description: "NotFound",
   httpApiStatus: 404
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(notFoundResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `NotFound`, decoding an empty 404 response into a
+ * `NotFound` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -113,6 +164,9 @@ export const NotFoundNoContent = NotFound.pipe(HttpApiSchema.asNoContent({
 }))
 
 /**
+ * Built-in HTTP API error for a `405 Method Not Allowed` response. When used
+ * directly as a server response, it renders as an empty response with status 405.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -122,10 +176,16 @@ export class MethodNotAllowed extends Schema.ErrorClass<MethodNotAllowed>("effec
   description: "MethodNotAllowed",
   httpApiStatus: 405
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(methodNotAllowedResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `MethodNotAllowed`, decoding an empty 405 response
+ * into a `MethodNotAllowed` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -134,6 +194,9 @@ export const MethodNotAllowedNoContent = MethodNotAllowed.pipe(HttpApiSchema.asN
 }))
 
 /**
+ * Built-in HTTP API error for a `406 Not Acceptable` response. When used directly
+ * as a server response, it renders as an empty response with status 406.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -143,10 +206,16 @@ export class NotAcceptable extends Schema.ErrorClass<NotAcceptable>("effect/Http
   description: "NotAcceptable",
   httpApiStatus: 406
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(notAcceptableResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `NotAcceptable`, decoding an empty 406 response
+ * into a `NotAcceptable` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -155,6 +224,9 @@ export const NotAcceptableNoContent = NotAcceptable.pipe(HttpApiSchema.asNoConte
 }))
 
 /**
+ * Built-in HTTP API error for a `408 Request Timeout` response. When used directly
+ * as a server response, it renders as an empty response with status 408.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -164,10 +236,16 @@ export class RequestTimeout extends Schema.ErrorClass<RequestTimeout>("effect/Ht
   description: "RequestTimeout",
   httpApiStatus: 408
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(requestTimeoutResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `RequestTimeout`, decoding an empty 408 response
+ * into a `RequestTimeout` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -176,6 +254,9 @@ export const RequestTimeoutNoContent = RequestTimeout.pipe(HttpApiSchema.asNoCon
 }))
 
 /**
+ * Built-in HTTP API error for a `409 Conflict` response. When used directly as a
+ * server response, it renders as an empty response with status 409.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -185,18 +266,27 @@ export class Conflict extends Schema.ErrorClass<Conflict>("effect/HttpApiError/C
   description: "Conflict",
   httpApiStatus: 409
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(conflictResponse)
+  }
 }
 
 /**
- * @since 4.0.0
+ * No-content schema variant for `Conflict`, decoding an empty 409 response into a
+ * `Conflict` error value.
+ *
  * @category NoContent errors
+ * @since 4.0.0
  */
 export const ConflictNoContent = Conflict.pipe(HttpApiSchema.asNoContent({
   decode: () => new Conflict({})
 }))
 
 /**
+ * Built-in HTTP API error for a `410 Gone` response. When used directly as a
+ * server response, it renders as an empty response with status 410.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -206,10 +296,16 @@ export class Gone extends Schema.ErrorClass<Gone>("effect/HttpApiError/Gone")({
   description: "Gone",
   httpApiStatus: 410
 }) {
-  override readonly [ErrorReporter.ignore] = true
+  override readonly [ErrorReporter.ignore] = true;
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(goneResponse)
+  }
 }
 
 /**
+ * No-content schema variant for `Gone`, decoding an empty 410 response into a
+ * `Gone` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -218,6 +314,9 @@ export const GoneNoContent = Gone.pipe(HttpApiSchema.asNoContent({
 }))
 
 /**
+ * Built-in HTTP API error for a `500 Internal Server Error` response. When used
+ * directly as a server response, it renders as an empty response with status 500.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -228,9 +327,16 @@ export class InternalServerError
     description: "InternalServerError",
     httpApiStatus: 500
   })
-{}
+{
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(internalServerErrorResponse)
+  }
+}
 
 /**
+ * No-content schema variant for `InternalServerError`, decoding an empty 500
+ * response into an `InternalServerError` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -239,6 +345,9 @@ export const InternalServerErrorNoContent = InternalServerError.pipe(HttpApiSche
 }))
 
 /**
+ * Built-in HTTP API error for a `501 Not Implemented` response. When used directly
+ * as a server response, it renders as an empty response with status 501.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -247,9 +356,16 @@ export class NotImplemented extends Schema.ErrorClass<NotImplemented>("effect/Ht
 }, {
   description: "NotImplemented",
   httpApiStatus: 501
-}) {}
+}) {
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(notImplementedResponse)
+  }
+}
 
 /**
+ * No-content schema variant for `NotImplemented`, decoding an empty 501 response
+ * into a `NotImplemented` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
@@ -258,6 +374,9 @@ export const NotImplementedNoContent = NotImplemented.pipe(HttpApiSchema.asNoCon
 }))
 
 /**
+ * Built-in HTTP API error for a `503 Service Unavailable` response. When used
+ * directly as a server response, it renders as an empty response with status 503.
+ *
  * @category Built-in errors
  * @since 4.0.0
  */
@@ -268,12 +387,68 @@ export class ServiceUnavailable
     description: "ServiceUnavailable",
     httpApiStatus: 503
   })
-{}
+{
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(serviceUnavailableResponse)
+  }
+}
 
 /**
+ * No-content schema variant for `ServiceUnavailable`, decoding an empty 503
+ * response into a `ServiceUnavailable` error value.
+ *
  * @category NoContent errors
  * @since 4.0.0
  */
 export const ServiceUnavailableNoContent = ServiceUnavailable.pipe(HttpApiSchema.asNoContent({
   decode: () => new ServiceUnavailable({})
 }))
+
+/**
+ * Type-level identifier used to mark `HttpApiSchemaError` values.
+ *
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export type HttpApiSchemaErrorTypeId = "~effect/httpapi/HttpApiError/HttpApiSchemaError"
+
+/**
+ * Runtime identifier used to mark and detect `HttpApiSchemaError` values.
+ *
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export const HttpApiSchemaErrorTypeId: HttpApiSchemaErrorTypeId = "~effect/httpapi/HttpApiError/HttpApiSchemaError"
+
+/**
+ * Error raised when an HTTP API request component fails schema decoding. It records
+ * which component failed and responds as an empty `400 Bad Request` when rendered
+ * as a server response.
+ *
+ * @category Parsing errors
+ * @since 4.0.0
+ */
+export class HttpApiSchemaError extends Data.TaggedClass("HttpApiSchemaError")<{
+  readonly kind: "Params" | "Headers" | "Query" | "Body" | "Payload"
+  readonly cause: Schema.SchemaError
+}> {
+  readonly [HttpApiSchemaErrorTypeId]: HttpApiSchemaErrorTypeId = HttpApiSchemaErrorTypeId
+
+  static is(u: unknown): u is HttpApiSchemaError {
+    return hasProperty(u, HttpApiSchemaErrorTypeId)
+  }
+
+  static wrap<A, R>(
+    kind: HttpApiSchemaError["kind"],
+    effect: Effect.Effect<A, Schema.SchemaError, R>
+  ): Effect.Effect<A, HttpApiSchemaError, R> {
+    return Effect.mapError(effect, (error) => new HttpApiSchemaError({ kind, cause: error }))
+  }
+
+  readonly name = "HttpApiSchemaError"
+  readonly message = this.kind;
+
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(badRequestResponse)
+  }
+}

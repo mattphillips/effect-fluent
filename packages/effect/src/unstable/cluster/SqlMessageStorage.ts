@@ -1,29 +1,49 @@
 /**
+ * SQL-backed message storage for the unstable cluster runtime.
+ *
+ * This module persists encoded cluster envelopes and replies in SQL tables so
+ * shards can resume work after process restarts, redeliver unprocessed messages,
+ * deduplicate requests by primary key, and replay outstanding reply chunks until
+ * they are acknowledged. It is the storage implementation to use when a cluster
+ * needs durable request / reply state backed by `SqlClient` rather than an
+ * in-memory store.
+ *
+ * The storage layer runs its own migrations and creates messages, replies, and
+ * migration tables using the configured prefix (`cluster` by default). Choose a
+ * stable prefix before deploying, because changing it points the runtime at a
+ * different set of tables. Existing deployments should also keep the generated
+ * migration history table with the message tables so future schema changes can
+ * be applied consistently across supported SQL dialects.
+ *
  * @since 4.0.0
  */
+// eslint-disable effect/no-bigint-literals
 import * as Arr from "../../Array.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
+import * as Option from "../../Option.ts"
 import * as Schedule from "../../Schedule.ts"
-import * as UndefinedOr from "../../UndefinedOr.ts"
 import * as Migrator from "../sql/Migrator.ts"
 import * as SqlClient from "../sql/SqlClient.ts"
 import type { Row } from "../sql/SqlConnection.ts"
-import type { SqlError } from "../sql/SqlError.ts"
+import { isSqlError, type SqlError } from "../sql/SqlError.ts"
 import { PersistenceError } from "./ClusterError.ts"
 import type * as Envelope from "./Envelope.ts"
 import * as MessageStorage from "./MessageStorage.ts"
 import { SaveResultEncoded } from "./MessageStorage.ts"
 import type * as Reply from "./Reply.ts"
-import { ShardId } from "./ShardId.ts"
+import * as ShardId from "./ShardId.ts"
 import type { ShardingConfig } from "./ShardingConfig.ts"
 import * as Snowflake from "./Snowflake.ts"
 
 const withTracerDisabled = Effect.withTracerEnabled(false)
 
 /**
+ * Creates a SQL-backed `MessageStorage` implementation, running its migrations
+ * and using the optional table prefix.
+ *
+ * @category constructors
  * @since 4.0.0
- * @category Constructors
  */
 export const make: (options?: {
   readonly prefix?: string | undefined
@@ -138,7 +158,7 @@ export const make: (options?: {
 
   const messageFromRow = (row: MessageRow & ReplyJoinRow): {
     readonly envelope: Envelope.Encoded
-    readonly lastSentReply: Reply.Encoded | undefined
+    readonly lastSentReply: Option.Option<Reply.Encoded>
   } => {
     switch (Number(row.kind) as 0 | 1 | 2) {
       case 0:
@@ -163,14 +183,14 @@ export const make: (options?: {
               undefined)
           },
           lastSentReply: row.reply_reply_id ?
-            {
+            Option.some({
               _tag: "Chunk",
               id: String(row.reply_reply_id),
               requestId: String(row.request_id),
               sequence: Number(row.reply_sequence!),
               values: JSON.parse(row.reply_payload!)
-            } :
-            undefined
+            }) :
+            Option.none()
         }
       case 1:
         return {
@@ -185,7 +205,7 @@ export const make: (options?: {
               entityId: row.entity_id
             }
           },
-          lastSentReply: undefined
+          lastSentReply: Option.none()
         }
       case 2:
         return {
@@ -199,7 +219,7 @@ export const make: (options?: {
               entityId: row.entity_id
             }
           },
-          lastSentReply: undefined
+          lastSentReply: Option.none()
         }
     }
   }
@@ -395,24 +415,27 @@ export const make: (options?: {
             }
             const row = rows[0]
             const replyKindNum = typeof row.reply_kind === "bigint" ? Number(row.reply_kind) : row.reply_kind
-            return SaveResultEncoded.Duplicate({
-              originalId: Snowflake.Snowflake(row.id as any),
-              lastReceivedReply: row.reply_id ?
-                replyKindNum === replyKind.WithExit ?
-                  {
+            const lastReceivedReply: Option.Option<Reply.Encoded> = row.reply_id
+              ? Option.some(
+                replyKindNum === replyKind.WithExit
+                  ? {
                     id: String(row.reply_id),
                     requestId: String(row.id),
                     _tag: "WithExit",
                     exit: JSON.parse(row.reply_payload as string)
-                  } :
-                  {
+                  }
+                  : {
                     id: String(row.reply_id),
                     requestId: String(row.id),
                     _tag: "Chunk",
                     sequence: Number(row.reply_sequence),
                     values: JSON.parse(row.reply_payload as string)
-                  } :
-                undefined
+                  }
+              )
+              : Option.none()
+            return SaveResultEncoded.Duplicate({
+              originalId: Snowflake.Snowflake(row.id as any),
+              lastReceivedReply
             })
           })
         )
@@ -455,7 +478,7 @@ export const make: (options?: {
 
     requestIdForPrimaryKey: (primaryKey) =>
       sql<{ id: string | bigint }>`SELECT id FROM ${messagesTableSql} WHERE message_id = ${primaryKey}`.pipe(
-        Effect.map((rows) => UndefinedOr.map(rows[0]?.id, Snowflake.Snowflake)),
+        Effect.map((rows) => Option.map(Option.fromNullishOr(rows[0]?.id), Snowflake.Snowflake)),
         Effect.provideService(SqlClient.SafeIntegers, true),
         PersistenceError.refail,
         withTracerDisabled
@@ -506,7 +529,7 @@ export const make: (options?: {
         }
         const messages: Array<{
           readonly envelope: Envelope.Encoded
-          readonly lastSentReply: Reply.Encoded | undefined
+          readonly lastSentReply: Option.Option<Reply.Encoded>
         }> = new Array(rows.length)
         const ids = new Array<string>(rows.length)
         for (let i = 0; i < rows.length; i++) {
@@ -589,13 +612,21 @@ export const make: (options?: {
         Effect.asVoid,
         PersistenceError.refail,
         withTracerDisabled
+      ),
+
+    withTransaction: (effect) =>
+      sql.withTransaction(effect).pipe(
+        Effect.catchIf(isSqlError, Effect.die)
       )
   })
 }, withTracerDisabled)
 
 /**
+ * Layer that provides SQL-backed `MessageStorage` using the default table prefix
+ * and the default snowflake generator.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layer: Layer.Layer<
   MessageStorage.MessageStorage,
@@ -606,8 +637,10 @@ export const layer: Layer.Layer<
 )
 
 /**
+ * Layer that provides SQL-backed `MessageStorage` using a custom table prefix.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layerWith = (options: {
   readonly prefix?: string | undefined

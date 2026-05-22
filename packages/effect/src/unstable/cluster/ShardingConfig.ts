@@ -1,23 +1,38 @@
 /**
+ * The `ShardingConfig` module defines the configuration used by a cluster
+ * runner to participate in Effect Cluster sharding. It describes how a runner is
+ * addressed by other runners, which shard groups it can host, how many shards
+ * are assigned per group, and the timing settings used for locks, assignment
+ * refreshes, health checks, entity lifecycle, and message polling.
+ *
+ * Use this module when wiring a sharded application locally with
+ * {@link layer}, loading deployment settings from environment variables with
+ * {@link layerFromEnv}, or overriding selected defaults for tests and
+ * single-node development. In production, keep cluster-wide values such as
+ * `shardsPerGroup` and shard groups consistent across runners, choose stable
+ * externally reachable runner addresses, and tune lock expiration and refresh
+ * intervals to match the storage backend and shutdown behavior of the
+ * deployment platform.
+ *
  * @since 4.0.0
  */
 import * as Config from "../../Config.ts"
 import * as ConfigProvider from "../../ConfigProvider.ts"
+import * as Context from "../../Context.ts"
 import * as Duration from "../../Duration.ts"
 import * as Effect from "../../Effect.ts"
 import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import * as Schema from "../../Schema.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import { RunnerAddress } from "./RunnerAddress.ts"
 
 /**
  * Represents the configuration for the `Sharding` service on a given runner.
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
-export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
+export class ShardingConfig extends Context.Service<ShardingConfig, {
   /**
    * The address for the current runner that other runners can use to
    * communicate with it.
@@ -25,13 +40,13 @@ export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
    * If `None`, the runner is not part of the cluster and will be in a client-only
    * mode.
    */
-  readonly runnerAddress: RunnerAddress | undefined
+  readonly runnerAddress: Option.Option<RunnerAddress>
   /**
    * The listen address for the current runner.
    *
    * Defaults to the `runnerAddress`.
    */
-  readonly runnerListenAddress: RunnerAddress | undefined
+  readonly runnerListenAddress: Option.Option<RunnerAddress>
   /**
    * A number that determines how many shards this runner will be assigned
    * relative to other runners.
@@ -43,11 +58,17 @@ export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
    */
   readonly runnerShardWeight: number
   /**
+   * The shard groups available across all runners.
+   *
+   * Defaults to `["default"]`.
+   */
+  readonly availableShardGroups: ReadonlyArray<string>
+  /**
    * The shard groups that are assigned to this runner.
    *
    * Defaults to `["default"]`.
    */
-  readonly shardGroups: ReadonlyArray<string>
+  readonly assignedShardGroups: ReadonlyArray<string>
   /**
    * The number of shards to allocate per shard group.
    *
@@ -122,18 +143,23 @@ export class ShardingConfig extends ServiceMap.Service<ShardingConfig, {
   readonly simulateRemoteSerialization: boolean
 }>()("effect/cluster/ShardingConfig") {}
 
-const defaultRunnerAddress = RunnerAddress.makeUnsafe({ host: "localhost", port: 34431 })
+const defaultRunnerAddress = RunnerAddress.make({ host: "localhost", port: 34431 })
 
 /**
- * @since 4.0.0
+ * Default values for `ShardingConfig`, including the default local runner address,
+ * shard group, shard count, mailbox settings, polling intervals, and remote
+ * serialization simulation.
+ *
  * @category defaults
+ * @since 4.0.0
  */
 export const defaults: ShardingConfig["Service"] = {
-  runnerAddress: defaultRunnerAddress,
-  runnerListenAddress: undefined,
+  runnerAddress: Option.some(defaultRunnerAddress),
+  runnerListenAddress: Option.none(),
   runnerShardWeight: 1,
   shardsPerGroup: 300,
-  shardGroups: ["default"],
+  availableShardGroups: ["default"],
+  assignedShardGroups: ["default"],
   preemptiveShutdown: true,
   shardLockRefreshInterval: Duration.seconds(10),
   shardLockExpiration: Duration.seconds(35),
@@ -151,21 +177,29 @@ export const defaults: ShardingConfig["Service"] = {
 }
 
 /**
+ * Creates a `ShardingConfig` layer by merging the provided partial options over
+ * `defaults`.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layer = (options?: Partial<ShardingConfig["Service"]>): Layer.Layer<ShardingConfig> =>
   Layer.succeed(ShardingConfig)({ ...defaults, ...options })
 
 /**
- * @since 4.0.0
+ * Layer that provides the default `ShardingConfig` values.
+ *
  * @category defaults
+ * @since 4.0.0
  */
 export const layerDefaults: Layer.Layer<ShardingConfig> = layer()
 
 /**
- * @since 4.0.0
+ * Config descriptor for loading `ShardingConfig` values, applying the same
+ * defaults used by the in-memory `defaults` object.
+ *
  * @category Config
+ * @since 4.0.0
  */
 export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
   runnerAddress: Config.all({
@@ -177,7 +211,7 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
       Config.withDefault(defaultRunnerAddress.port)
       // Config.withDescription("The port used for inter-runner communication.")
     )
-  }).pipe(Config.map((options) => RunnerAddress.makeUnsafe(options)), Config.option, Config.map(Option.getOrUndefined)),
+  }).pipe(Config.map((options) => RunnerAddress.make(options)), Config.option),
   runnerListenAddress: Config.all({
     host: Config.string("listenHost"),
     // Config.withDescription("The host to listen on.")
@@ -185,12 +219,16 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
       Config.withDefault(defaultRunnerAddress.port)
       // Config.withDescription("The port to listen on.")
     )
-  }).pipe(Config.map((options) => RunnerAddress.makeUnsafe(options)), Config.option, Config.map(Option.getOrUndefined)),
+  }).pipe(Config.map((options) => RunnerAddress.make(options)), Config.option),
   runnerShardWeight: Config.int("runnerShardWeight").pipe(
     Config.withDefault(defaults.runnerShardWeight)
     // Config.withDescription("A number that determines how many shards this runner will be assigned relative to other runners.")
   ),
-  shardGroups: Config.schema(Schema.Array(Schema.String), "shardGroups").pipe(
+  availableShardGroups: Config.schema(Schema.Array(Schema.String), "availableShardGroups").pipe(
+    Config.withDefault(["default"])
+    // Config.withDescription("The shard groups available across all runners.")
+  ),
+  assignedShardGroups: Config.schema(Schema.Array(Schema.String), "shardGroups").pipe(
     Config.withDefault(["default"])
     // Config.withDescription("The shard groups that are assigned to this runner.")
   ),
@@ -260,10 +298,13 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
 })
 
 /**
- * @since 4.0.0
+ * Effect that loads `ShardingConfig` from environment variables using the
+ * constant-case config provider.
+ *
  * @category Config
+ * @since 4.0.0
  */
-export const configFromEnv = config.asEffect().pipe(
+export const configFromEnv = config.pipe(
   Effect.provideService(
     ConfigProvider.ConfigProvider,
     ConfigProvider.fromEnv().pipe(
@@ -273,8 +314,11 @@ export const configFromEnv = config.asEffect().pipe(
 )
 
 /**
+ * Layer that loads `ShardingConfig` from environment variables and, when options
+ * are provided, overlays those options on top of the loaded values.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layerFromEnv = (options?: Partial<ShardingConfig["Service"]> | undefined): Layer.Layer<
   ShardingConfig,
@@ -283,3 +327,24 @@ export const layerFromEnv = (options?: Partial<ShardingConfig["Service"]> | unde
   Layer.effect(ShardingConfig)(
     options ? Effect.map(configFromEnv, (config) => ({ ...config, ...options })) : configFromEnv
   )
+
+/**
+ * Normalizes the provided `ShardingConfig` to calculate the `available` and
+ * `assigned` shard groups.
+ *
+ * @category Shard groups
+ * @since 4.0.0
+ */
+export const shardGroupConfig = (config: ShardingConfig["Service"]): {
+  readonly available: ReadonlySet<string>
+  readonly assigned: ReadonlySet<string>
+} => {
+  const available = new Set(config.availableShardGroups.slice().sort())
+  const assigned = new Set<string>()
+  available.forEach((group) => {
+    if (config.assignedShardGroups.includes(group)) {
+      assigned.add(group)
+    }
+  })
+  return { available, assigned }
+}

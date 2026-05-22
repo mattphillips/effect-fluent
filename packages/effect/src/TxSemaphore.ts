@@ -1,4 +1,22 @@
 /**
+ * The `TxSemaphore` module provides a transactional semaphore for coordinating
+ * access to limited resources from within Effect transactions. A semaphore
+ * tracks a fixed number of permits, and transactional operations can acquire,
+ * release, or inspect those permits atomically with other transactional state.
+ *
+ * Use `TxSemaphore` when permit accounting needs to compose with `TxRef` and
+ * other transactional updates, such as guarding resource pools, rate-limited
+ * sections, or workflows that must reserve capacity consistently before
+ * committing related state changes.
+ *
+ * **Gotchas**
+ *
+ * - Permit operations are intended for transactional workflows and are wrapped
+ *   with `Effect.tx`.
+ * - The semaphore capacity is fixed at construction time; releasing more
+ *   permits than the original capacity fails.
+ * - Creating a semaphore with a negative number of permits defects.
+ *
  * @since 4.0.0
  */
 
@@ -7,18 +25,20 @@ import type { Inspectable } from "./Inspectable.ts"
 import { NodeInspectSymbol, toJson } from "./Inspectable.ts"
 import type { Pipeable } from "./Pipeable.ts"
 import { pipeArguments } from "./Pipeable.ts"
+import { hasProperty } from "./Predicate.ts"
 import type * as Scope from "./Scope.ts"
 import * as TxRef from "./TxRef.ts"
 
 const TypeId = "~effect/transactions/TxSemaphore"
 
 /**
- * A transactional semaphore that manages permits using Software Transactional Memory (STM) semantics.
+ * A transactional semaphore that manages permits using Software Transactional
+ * Memory (STM) semantics, providing atomic permit acquisition and release
+ * operations within Effect transactions for concurrency control over limited
+ * resources.
  *
- * TxSemaphore provides atomic permit acquisition and release operations within Effect transactions,
- * ensuring thread-safe concurrency control for limited resources.
+ * **Example** (Managing permits transactionally)
  *
- * @example
  * ```ts
  * import { Effect, TxSemaphore } from "effect"
  *
@@ -38,8 +58,8 @@ const TypeId = "~effect/transactions/TxSemaphore"
  * })
  * ```
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
 export interface TxSemaphore extends Inspectable, Pipeable {
   readonly [TypeId]: typeof TypeId
@@ -73,7 +93,8 @@ const makeTxSemaphore = (permitsRef: TxRef.TxRef<number>, capacity: number): TxS
 /**
  * Creates a new TxSemaphore with the specified number of permits.
  *
- * @example
+ * **Example** (Creating a semaphore)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -93,14 +114,10 @@ const makeTxSemaphore = (permitsRef: TxRef.TxRef<number>, capacity: number): TxS
  * })
  * ```
  *
- * @param permits - The initial number of permits (must be non-negative)
- * @returns Effect that succeeds with a new TxSemaphore
- * @throws Defect if permits is negative
- *
- * @since 4.0.0
  * @category constructors
+ * @since 2.0.0
  */
-export const make = (permits: number): Effect.Effect<TxSemaphore, never, Effect.Transaction> =>
+export const make = (permits: number): Effect.Effect<TxSemaphore> =>
   Effect.gen(function*() {
     if (permits < 0) {
       return yield* Effect.die(new Error("Permits must be non-negative"))
@@ -108,12 +125,13 @@ export const make = (permits: number): Effect.Effect<TxSemaphore, never, Effect.
 
     const permitsRef = yield* TxRef.make(permits)
     return makeTxSemaphore(permitsRef, permits)
-  })
+  }).pipe(Effect.tx)
 
 /**
  * Gets the current number of available permits in the semaphore.
  *
- * @example
+ * **Example** (Checking available permits)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -134,19 +152,16 @@ export const make = (permits: number): Effect.Effect<TxSemaphore, never, Effect.
  * })
  * ```
  *
- * @param self - The TxSemaphore to inspect
- * @returns Effect that succeeds with the current number of available permits
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const available = (self: TxSemaphore): Effect.Effect<number, never, Effect.Transaction> =>
-  TxRef.get(self.permitsRef)
+export const available = (self: TxSemaphore): Effect.Effect<number> => TxRef.get(self.permitsRef)
 
 /**
  * Gets the maximum capacity (total permits) of the semaphore.
  *
- * @example
+ * **Example** (Checking semaphore capacity)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -163,11 +178,8 @@ export const available = (self: TxSemaphore): Effect.Effect<number, never, Effec
  * })
  * ```
  *
- * @param self - The TxSemaphore to inspect
- * @returns Effect that succeeds with the semaphore's maximum capacity
- *
- * @since 4.0.0
  * @category combinators
+ * @since 4.0.0
  */
 export const capacity = (self: TxSemaphore): Effect.Effect<number> => Effect.succeed(self.capacity)
 
@@ -175,7 +187,8 @@ export const capacity = (self: TxSemaphore): Effect.Effect<number> => Effect.suc
  * Acquires a single permit from the semaphore. If no permits are available,
  * the effect will block until one becomes available.
  *
- * @example
+ * **Example** (Acquiring a permit)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -195,26 +208,33 @@ export const capacity = (self: TxSemaphore): Effect.Effect<number> => Effect.suc
  * })
  * ```
  *
- * @param self - The TxSemaphore from which to acquire a permit
- * @returns Effect that succeeds when a permit is acquired
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const acquire = (self: TxSemaphore): Effect.Effect<void, never, Effect.Transaction> =>
+export const acquire = (self: TxSemaphore): Effect.Effect<void> =>
   Effect.gen(function*() {
     const permits = yield* TxRef.get(self.permitsRef)
     if (permits <= 0) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
     yield* TxRef.set(self.permitsRef, permits - 1)
-  })
+  }).pipe(Effect.tx)
 
 /**
- * Acquires the specified number of permits from the semaphore. If not enough
- * permits are available, the effect will block until they become available.
+ * Acquires the specified number of permits from the semaphore.
  *
- * @example
+ * **Details**
+ *
+ * If fewer than `n` permits are available, the transaction retries until enough
+ * permits are released.
+ *
+ * **Gotchas**
+ *
+ * Passing a non-positive `n` dies with a defect. Passing a value greater than
+ * the semaphore capacity can wait forever because the capacity is fixed.
+ *
+ * **Example** (Acquiring multiple permits)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -230,31 +250,28 @@ export const acquire = (self: TxSemaphore): Effect.Effect<void, never, Effect.Tr
  * })
  * ```
  *
- * @param self - The TxSemaphore from which to acquire permits
- * @param n - The number of permits to acquire (must be positive)
- * @returns Effect that succeeds when the permits are acquired
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const acquireN = (self: TxSemaphore, n: number): Effect.Effect<void, never, Effect.Transaction> => {
+export const acquireN = (self: TxSemaphore, n: number): Effect.Effect<void> => {
   if (n <= 0) {
     return Effect.die(new Error("Number of permits must be positive"))
   }
   return Effect.gen(function*() {
     const permits = yield* TxRef.get(self.permitsRef)
     if (permits < n) {
-      return yield* Effect.retryTransaction
+      return yield* Effect.txRetry
     }
     yield* TxRef.set(self.permitsRef, permits - n)
-  })
+  }).pipe(Effect.tx)
 }
 
 /**
- * Tries to acquire a single permit from the semaphore without blocking.
- * Returns true if successful, false if no permits are available.
+ * Tries to acquire a single permit from the semaphore without blocking,
+ * returning `true` if successful or `false` if no permits are available.
  *
- * @example
+ * **Example** (Trying to acquire a permit)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -271,13 +288,10 @@ export const acquireN = (self: TxSemaphore, n: number): Effect.Effect<void, neve
  * })
  * ```
  *
- * @param self - The TxSemaphore from which to try acquiring a permit
- * @returns Effect that succeeds with true if permit acquired, false otherwise
- *
- * @since 4.0.0
  * @category combinators
+ * @since 4.0.0
  */
-export const tryAcquire = (self: TxSemaphore): Effect.Effect<boolean, never, Effect.Transaction> =>
+export const tryAcquire = (self: TxSemaphore): Effect.Effect<boolean> =>
   TxRef.modify(self.permitsRef, (permits: number) => {
     if (permits > 0) {
       return [true, permits - 1]
@@ -286,10 +300,12 @@ export const tryAcquire = (self: TxSemaphore): Effect.Effect<boolean, never, Eff
   })
 
 /**
- * Tries to acquire the specified number of permits from the semaphore without blocking.
- * Returns true if successful, false if not enough permits are available.
+ * Tries to acquire the specified number of permits from the semaphore without
+ * blocking, returning `true` if successful or `false` if not enough permits are
+ * available.
  *
- * @example
+ * **Example** (Trying to acquire multiple permits)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -306,14 +322,10 @@ export const tryAcquire = (self: TxSemaphore): Effect.Effect<boolean, never, Eff
  * })
  * ```
  *
- * @param self - The TxSemaphore from which to try acquiring permits
- * @param n - The number of permits to try acquiring (must be positive)
- * @returns Effect that succeeds with true if permits acquired, false otherwise
- *
- * @since 4.0.0
  * @category combinators
+ * @since 4.0.0
  */
-export const tryAcquireN = (self: TxSemaphore, n: number): Effect.Effect<boolean, never, Effect.Transaction> => {
+export const tryAcquireN = (self: TxSemaphore, n: number): Effect.Effect<boolean> => {
   if (n <= 0) {
     return Effect.die(new Error("Number of permits must be positive"))
   }
@@ -326,9 +338,16 @@ export const tryAcquireN = (self: TxSemaphore, n: number): Effect.Effect<boolean
 }
 
 /**
- * Releases a single permit back to the semaphore, making it available for acquisition.
+ * Releases one permit back to the semaphore, making it available for
+ * acquisition.
  *
- * @example
+ * **Details**
+ *
+ * If the semaphore is already at capacity, this operation leaves the permit
+ * count unchanged.
+ *
+ * **Example** (Releasing a permit)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -347,19 +366,25 @@ export const tryAcquireN = (self: TxSemaphore, n: number): Effect.Effect<boolean
  * })
  * ```
  *
- * @param self - The TxSemaphore to which to release a permit
- * @returns Effect that succeeds when the permit is released
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const release = (self: TxSemaphore): Effect.Effect<void, never, Effect.Transaction> =>
+export const release = (self: TxSemaphore): Effect.Effect<void> =>
   TxRef.update(self.permitsRef, (permits: number) => permits >= self.capacity ? permits : permits + 1)
 
 /**
  * Releases the specified number of permits back to the semaphore.
  *
- * @example
+ * **Details**
+ *
+ * The available permit count is capped at the semaphore capacity.
+ *
+ * **Gotchas**
+ *
+ * Passing a non-positive `n` dies with a defect.
+ *
+ * **Example** (Releasing multiple permits)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -378,14 +403,10 @@ export const release = (self: TxSemaphore): Effect.Effect<void, never, Effect.Tr
  * })
  * ```
  *
- * @param self - The TxSemaphore to which to release permits
- * @param n - The number of permits to release (must be positive)
- * @returns Effect that succeeds when the permits are released
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const releaseN = (self: TxSemaphore, n: number): Effect.Effect<void, never, Effect.Transaction> => {
+export const releaseN = (self: TxSemaphore, n: number): Effect.Effect<void> => {
   if (n <= 0) {
     return Effect.die(new Error("Number of permits must be positive"))
   }
@@ -400,10 +421,13 @@ export const releaseN = (self: TxSemaphore, n: number): Effect.Effect<void, neve
  * automatically acquired before execution and released afterwards, even if the
  * effect fails or is interrupted.
  *
- * **Note**: The permit acquisition and release operations use atomic semantics
- * to ensure proper resource management with Effect's scoped operations.
+ * **Details**
  *
- * @example
+ * The permit acquisition and release operations use atomic semantics to ensure
+ * proper resource management with Effect's scoped operations.
+ *
+ * **Example** (Running an effect with a permit)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -426,32 +450,46 @@ export const releaseN = (self: TxSemaphore, n: number): Effect.Effect<void, neve
  * })
  * ```
  *
- * @param self - The TxSemaphore to acquire a permit from
- * @param effect - The effect to execute with the permit
- * @returns Effect that succeeds with the result of the provided effect
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const withPermit = <A, E, R>(
-  self: TxSemaphore,
-  effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, E, R> =>
-  Effect.acquireUseRelease(
-    Effect.transaction(acquire(self)),
+export const withPermit: {
+  (self: TxSemaphore): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: TxSemaphore, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
+} = ((...args: Array<any>) => {
+  if (args.length === 1) {
+    const [self] = args
+    return (effect: Effect.Effect<any, any, any>) =>
+      Effect.acquireUseRelease(
+        acquire(self),
+        () => effect,
+        () => release(self)
+      )
+  }
+  const [self, effect] = args
+  return Effect.acquireUseRelease(
+    acquire(self),
     () => effect,
-    () => Effect.transaction(release(self))
+    () => release(self)
   )
+}) as any
 
 /**
- * Executes an effect with the specified number of permits from the semaphore.
- * The permits are automatically acquired before execution and released afterwards,
- * even if the effect fails or is interrupted.
+ * Runs an effect while holding the specified number of permits from the
+ * semaphore.
  *
- * **Note**: The permit acquisition and release operations use atomic semantics
- * to ensure proper resource management with Effect's scoped operations.
+ * **Details**
  *
- * @example
+ * The permits are acquired before the effect starts and released after it
+ * completes, fails, or is interrupted.
+ *
+ * **Gotchas**
+ *
+ * Passing a non-positive `n` dies with a defect. Passing a value greater than
+ * the semaphore capacity can wait forever.
+ *
+ * **Example** (Running an effect with multiple permits)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -474,34 +512,42 @@ export const withPermit = <A, E, R>(
  * })
  * ```
  *
- * @param self - The TxSemaphore to acquire permits from
- * @param n - The number of permits to acquire (must be positive)
- * @param effect - The effect to execute with the permits
- * @returns Effect that succeeds with the result of the provided effect
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
-export const withPermits = <A, E, R>(
-  self: TxSemaphore,
-  n: number,
-  effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, E, R> =>
-  Effect.acquireUseRelease(
-    Effect.transaction(acquireN(self, n)),
+export const withPermits: {
+  (self: TxSemaphore, n: number): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
+  <A, E, R>(self: TxSemaphore, n: number, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
+} = ((...args: Array<any>) => {
+  if (args.length === 2) {
+    const [self, n] = args
+    return (effect: Effect.Effect<any, any, any>) =>
+      Effect.acquireUseRelease(
+        acquireN(self, n),
+        () => effect,
+        () => releaseN(self, n)
+      )
+  }
+  const [self, n, effect] = args
+  return Effect.acquireUseRelease(
+    acquireN(self, n),
     () => effect,
-    () => Effect.transaction(releaseN(self, n))
+    () => releaseN(self, n)
   )
+}) as any
 
 /**
  * Acquires a single permit from the semaphore in a scoped manner. The permit
  * will be automatically released when the scope is closed, even if effects
  * within the scope fail or are interrupted.
  *
- * **Note**: The permit acquisition and release operations use atomic semantics
- * to ensure proper resource management with Effect's scoped operations.
+ * **Details**
  *
- * @example
+ * The permit acquisition and release operations use atomic semantics to ensure
+ * proper resource management with Effect's scoped operations.
+ *
+ * **Example** (Acquiring a scoped permit)
+ *
  * ```ts
  * import { Console, Effect, TxSemaphore } from "effect"
  *
@@ -526,22 +572,20 @@ export const withPermits = <A, E, R>(
  * })
  * ```
  *
- * @param self - The TxSemaphore to acquire a permit from
- * @returns Effect that succeeds when the permit is acquired (within scope)
- *
- * @since 4.0.0
  * @category combinators
+ * @since 2.0.0
  */
 export const withPermitScoped = (self: TxSemaphore): Effect.Effect<void, never, Scope.Scope> =>
   Effect.acquireRelease(
-    Effect.transaction(acquire(self)),
-    () => Effect.transaction(release(self))
+    acquire(self),
+    () => release(self)
   )
 
 /**
  * Determines if the provided value is a TxSemaphore.
  *
- * @example
+ * **Example** (Checking semaphore values)
+ *
  * ```ts
  * import { Effect, TxSemaphore } from "effect"
  *
@@ -560,7 +604,7 @@ export const withPermitScoped = (self: TxSemaphore): Effect.Effect<void, never, 
  * })
  * ```
  *
- * @since 4.0.0
  * @category guards
+ * @since 4.0.0
  */
-export const isTxSemaphore = (u: unknown): u is TxSemaphore => typeof u === "object" && u !== null && TypeId in u
+export const isTxSemaphore = (u: unknown): u is TxSemaphore => hasProperty(u, TypeId)

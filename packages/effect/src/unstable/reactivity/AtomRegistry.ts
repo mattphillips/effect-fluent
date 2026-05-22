@@ -1,6 +1,26 @@
 /**
+ * The `AtomRegistry` module provides the runtime cache used by reactivity
+ * atoms. A registry owns the node graph for a group of atoms, stores their
+ * current values, records parent/child dependencies while atoms are read, and
+ * coordinates writes, refreshes, stream conversions, and node disposal.
+ *
+ * Create a registry directly with {@link make} or provide it with {@link layer}
+ * or {@link layerOptions} when a UI root, request, test, or other Effect scope
+ * needs its own atom state. The same atom can have different cached values in
+ * different registries, while serializable atoms are keyed by their
+ * serialization key so preloaded values can hydrate a node before its first
+ * read.
+ *
+ * Subscriptions and {@link mount} keep nodes alive and must be released when
+ * the consumer is done; scoped helpers install finalizers for this. Unobserved
+ * non-`keepAlive` atoms may be removed immediately or after their `idleTTL` (or
+ * the registry `defaultIdleTTL`), which means later reads can rebuild derived
+ * state. Disposing a registry clears its cache and makes future atom access an
+ * error.
+ *
  * @since 4.0.0
  */
+import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
 import * as Exit from "../../Exit.ts"
 import * as Fiber from "../../Fiber.ts"
@@ -9,35 +29,48 @@ import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import { hasProperty } from "../../Predicate.ts"
 import * as Queue from "../../Queue.ts"
-import type { Scheduler } from "../../Scheduler.ts"
+import type { Scheduler, SchedulerDispatcher } from "../../Scheduler.ts"
 import { MixedScheduler } from "../../Scheduler.ts"
 import * as Scope from "../../Scope.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
 import * as Stream from "../../Stream.ts"
 import * as Result from "./AsyncResult.ts"
 import type * as Atom from "./Atom.ts"
 
 /**
+ * The literal type used to identify `AtomRegistry` services and values.
+ *
+ * @category type IDs
  * @since 4.0.0
- * @category type ids
  */
 export type TypeId = "~effect/reactivity/AtomRegistry"
 
 /**
+ * The runtime type id used to identify `AtomRegistry` services and values.
+ *
+ * @category type IDs
  * @since 4.0.0
- * @category type ids
  */
 export const TypeId: TypeId = "~effect/reactivity/AtomRegistry"
 
 /**
- * @since 4.0.0
+ * Returns `true` when the value has the `AtomRegistry` type id.
+ *
  * @category guards
+ * @since 4.0.0
  */
 export const isAtomRegistry = (u: unknown): u is AtomRegistry => hasProperty(u, TypeId)
 
 /**
- * @since 4.0.0
+ * The runtime registry that stores atom nodes and coordinates reads, writes,
+ * refreshes, subscriptions, and disposal.
+ *
+ * **Details**
+ *
+ * It also manages scheduler configuration, serializable preloaded values, and node
+ * addition/removal callbacks.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface AtomRegistry {
   readonly [TypeId]: TypeId
@@ -61,8 +94,15 @@ export interface AtomRegistry {
 }
 
 /**
- * @since 4.0.0
+ * A registry node for a single atom.
+ *
+ * **Details**
+ *
+ * Nodes expose the current value, parent and child dependency links, listener set,
+ * and current lifecycle state.
+ *
  * @category models
+ * @since 4.0.0
  */
 export interface Node<A> {
   readonly atom: Atom.Atom<A>
@@ -74,8 +114,16 @@ export interface Node<A> {
 }
 
 /**
- * @since 4.0.0
+ * Creates an `AtomRegistry`.
+ *
+ * **Details**
+ *
+ * Options can preload initial atom values, provide a custom task scheduler,
+ * configure timeout bucket resolution, and set a default idle time-to-live for
+ * unused atoms.
+ *
  * @category constructors
+ * @since 4.0.0
  */
 export const make = (
   options?: {
@@ -93,14 +141,23 @@ export const make = (
   )
 
 /**
- * @since 4.0.0
+ * The `Context` service tag for the current `AtomRegistry`.
+ *
  * @category Tags
+ * @since 4.0.0
  */
-export const AtomRegistry = ServiceMap.Service<AtomRegistry>(TypeId)
+export const AtomRegistry = Context.Service<AtomRegistry>(TypeId)
 
 /**
+ * Creates a layer that provides an `AtomRegistry` configured with the supplied
+ * options.
+ *
+ * **Details**
+ *
+ * The registry is disposed when the layer scope is finalized.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layerOptions = (options?: {
   readonly initialValues?: Iterable<readonly [Atom.Atom<any>, any]> | undefined
@@ -122,8 +179,10 @@ export const layerOptions = (options?: {
   )
 
 /**
+ * The default layer that provides a fresh `AtomRegistry`.
+ *
+ * @category layers
  * @since 4.0.0
- * @category Layers
  */
 export const layer: Layer.Layer<AtomRegistry> = layerOptions()
 
@@ -132,8 +191,15 @@ export const layer: Layer.Layer<AtomRegistry> = layerOptions()
 // -----------------------------------------------------------------------------
 
 /**
+ * Converts an atom in this registry into a stream.
+ *
+ * **Details**
+ *
+ * The stream emits the current value immediately, emits subsequent changes, and
+ * unsubscribes from the registry when the stream scope closes.
+ *
+ * @category converting
  * @since 4.0.0
- * @category Conversions
  */
 export const toStream: {
   <A>(atom: Atom.Atom<A>): (self: AtomRegistry) => Stream.Stream<A>
@@ -144,7 +210,7 @@ export const toStream: {
     Stream.callback<A>((queue) =>
       Effect.suspend(() => {
         const fiber = Fiber.getCurrent()!
-        const scope = ServiceMap.getUnsafe(fiber.services, Scope.Scope)
+        const scope = Context.getUnsafe(fiber.context, Scope.Scope)
         const cancel = self.subscribe(atom, (value) => Queue.offerUnsafe(queue, value), {
           immediate: true
         })
@@ -154,8 +220,16 @@ export const toStream: {
 )
 
 /**
+ * Converts an `AsyncResult` atom in this registry into a stream of successful
+ * values.
+ *
+ * **Details**
+ *
+ * Initial results are skipped, failures fail the stream with their cause, and
+ * duplicate stream values are dropped with `Stream.changes`.
+ *
+ * @category converting
  * @since 4.0.0
- * @category Conversions
  */
 export const toStreamResult: {
   <A, E>(atom: Atom.Atom<Result.AsyncResult<A, E>>): (self: AtomRegistry) => Stream.Stream<A, E>
@@ -173,8 +247,15 @@ export const toStreamResult: {
 )
 
 /**
+ * Reads an `AsyncResult` atom from this registry as an effect.
+ *
+ * **Details**
+ *
+ * The effect waits for the result to leave `Initial`, and also waits through
+ * waiting results when `suspendOnWaiting` is enabled.
+ *
+ * @category converting
  * @since 4.0.0
- * @category Conversions
  */
 export const getResult: {
   <A, E>(atom: Atom.Atom<Result.AsyncResult<A, E>>, options?: {
@@ -206,8 +287,15 @@ export const getResult: {
 )
 
 /**
+ * Mounts an atom in this registry for the lifetime of the current scope.
+ *
+ * **Details**
+ *
+ * The atom is subscribed with a no-op listener and the subscription is released
+ * when the scope finalizer runs.
+ *
+ * @category converting
  * @since 4.0.0
- * @category Conversions
  */
 export const mount: {
   <A>(atom: Atom.Atom<A>): (self: AtomRegistry) => Effect.Effect<void, never, Scope.Scope>
@@ -241,6 +329,7 @@ class RegistryImpl implements AtomRegistry {
   readonly defaultIdleTTL: number | undefined
   readonly scheduler: Scheduler
   readonly schedulerAsync: Scheduler
+  readonly dispatcher: SchedulerDispatcher
   onNodeAdded?: ((node: Node<any>) => void) | undefined
   onNodeRemoved?: ((node: Node<any>) => void) | undefined
 
@@ -253,6 +342,7 @@ class RegistryImpl implements AtomRegistry {
     this[TypeId] = TypeId
     this.scheduler = new MixedScheduler("sync", scheduleTask)
     this.schedulerAsync = new MixedScheduler("async", scheduleTask)
+    this.dispatcher = this.schedulerAsync.makeDispatcher()
     this.defaultIdleTTL = defaultIdleTTL
 
     if (timeoutResolution === undefined && defaultIdleTTL !== undefined) {
@@ -372,7 +462,7 @@ class RegistryImpl implements AtomRegistry {
   }
 
   scheduleAtomRemoval(atom: Atom.Atom<any>): void {
-    this.schedulerAsync.scheduleTask(() => {
+    this.dispatcher.scheduleTask(() => {
       const node = this.nodes.get(atomKey(atom))
       if (node !== undefined && node.canBeRemoved) {
         this.removeNode(node)
@@ -381,7 +471,7 @@ class RegistryImpl implements AtomRegistry {
   }
 
   scheduleNodeRemoval(node: NodeImpl<any>): void {
-    this.schedulerAsync.scheduleTask(() => {
+    this.dispatcher.scheduleTask(() => {
       if (node.canBeRemoved) {
         this.removeNode(node)
       }
@@ -752,7 +842,7 @@ function childrenAreActive(children: Array<NodeImpl<any>>): boolean {
   return false
 }
 
-interface Lifetime<A> extends Atom.Context {
+interface Lifetime<A> extends Atom.AtomContext {
   isFn: boolean
   readonly node: NodeImpl<A>
   finalizers: Array<() => void> | undefined

@@ -28,7 +28,8 @@
  * - **Iteration**: O(n)
  * - **Memory**: Structural sharing minimizes allocation
  *
- * @example
+ * **Example** (Creating and combining chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -42,7 +43,8 @@
  * console.log(Chunk.toReadonlyArray(combined)) // [1, 2, 3, 4, 5, 6]
  * ```
  *
- * @example
+ * **Example** (Transforming chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -53,17 +55,17 @@
  * const sum = Chunk.reduce(evens, 0, (acc, n) => acc + n) // 12
  * ```
  *
- * @example
+ * **Example** (Processing chunks with Effect)
+ *
  * ```ts
  * import { Chunk, Effect } from "effect"
  *
  * // Working with Effects
- * const processChunk = (chunk: Chunk.Chunk<number>) =>
- *   Effect.gen(function*() {
- *     const mapped = Chunk.map(chunk, (n) => n * 2)
- *     const filtered = Chunk.filter(mapped, (n) => n > 5)
- *     return Chunk.toReadonlyArray(filtered)
- *   })
+ * const processChunk = Effect.fnUntraced(function*(chunk: Chunk.Chunk<number>) {
+ *   const mapped = Chunk.map(chunk, (n) => n * 2)
+ *   const filtered = Chunk.filter(mapped, (n) => n > 5)
+ *   return Chunk.toReadonlyArray(filtered)
+ * })
  * ```
  *
  * @since 2.0.0
@@ -88,14 +90,14 @@ import { hasProperty, type Predicate, type Refinement } from "./Predicate.ts"
 import * as R from "./Result.ts"
 import type { Result } from "./Result.ts"
 import type { Covariant, NoInfer } from "./Types.ts"
-import * as UndefinedOr from "./UndefinedOr.ts"
 
 const TypeId = "~effect/collections/Chunk"
 
 /**
  * A Chunk is an immutable, ordered collection optimized for efficient concatenation and access patterns.
  *
- * @example
+ * **Example** (Inspecting chunk values)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -121,7 +123,8 @@ export interface Chunk<out A> extends Iterable<A>, Equal.Equal, Pipeable, Inspec
 /**
  * A non-empty Chunk guaranteed to contain at least one element.
  *
- * @example
+ * **Example** (Working with non-empty chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -138,13 +141,13 @@ export interface NonEmptyChunk<out A> extends Chunk<A>, NonEmptyIterable<A> {}
 /**
  * Type lambda for Chunk, used for higher-kinded type operations.
  *
- * @example
+ * **Example** (Applying the Chunk type lambda)
+ *
  * ```ts
- * import type { ChunkTypeLambda } from "effect/Chunk"
- * import type { Kind } from "effect/HKT"
+ * import type { Chunk, HKT } from "effect"
  *
  * // Create a Chunk type using the type lambda
- * type NumberChunk = Kind<ChunkTypeLambda, never, never, never, number>
+ * type NumberChunk = HKT.Kind<Chunk.ChunkTypeLambda, never, never, never, number>
  * // Equivalent to: Chunk<number>
  * ```
  *
@@ -205,12 +208,13 @@ function copy<A>(
 const emptyArray: ReadonlyArray<never> = []
 
 /**
- * Compares the two chunks of equal length using the specified function
+ * Creates an `Equivalence` for chunks that compares chunk lengths and then
+ * compares corresponding elements with the provided element equivalence.
  *
- * @example
+ * **Example** (Comparing chunks for equivalence)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Equivalence from "effect/Equivalence"
+ * import { Chunk, Equivalence } from "effect"
  *
  * const chunk1 = Chunk.make(1, 2, 3)
  * const chunk2 = Chunk.make(1, 2, 3)
@@ -222,7 +226,7 @@ const emptyArray: ReadonlyArray<never> = []
  * ```
  *
  * @category equivalence
- * @since 2.0.0
+ * @since 4.0.0
  */
 export const makeEquivalence = <A>(isEquivalent: Equivalence.Equivalence<A>): Equivalence.Equivalence<Chunk<A>> =>
   Equivalence.make((self, that) =>
@@ -317,7 +321,8 @@ const makeChunk = <A>(backing: Backing<A>): Chunk<A> => {
 /**
  * Checks if `u` is a `Chunk<unknown>`
  *
- * @example
+ * **Example** (Checking for chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -342,7 +347,8 @@ const _empty = makeChunk<never>({ _tag: "IEmpty" })
 /**
  * Creates an empty `Chunk`.
  *
- * @example
+ * **Example** (Creating an empty chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -358,13 +364,13 @@ export const empty: <A = never>() => Chunk<A> = () => _empty
 /**
  * Builds a `NonEmptyChunk` from an non-empty collection of elements.
  *
- * @example
+ * **Example** (Creating a non-empty chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4)
- * console.log(chunk)
- * // { _id: 'Chunk', values: [ 1, 2, 3, 4 ] }
+ * console.log(Chunk.toArray(chunk)) // [1, 2, 3, 4]
  * ```
  *
  * @category constructors
@@ -376,13 +382,13 @@ export const make = <As extends readonly [any, ...Array<any>]>(...as: As): NonEm
 /**
  * Builds a `NonEmptyChunk` from a single element.
  *
- * @example
+ * **Example** (Creating a single-element chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.of("hello")
- * console.log(chunk)
- * // { _id: 'Chunk', values: [ "hello" ] }
+ * console.log(Chunk.toArray(chunk)) // ["hello"]
  * ```
  *
  * @category constructors
@@ -393,13 +399,13 @@ export const of = <A>(a: A): NonEmptyChunk<A> => makeChunk({ _tag: "ISingleton",
 /**
  * Creates a new `Chunk` from an iterable collection of values.
  *
- * @example
+ * **Example** (Creating chunks from iterables)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.fromIterable([1, 2, 3])
- * console.log(chunk)
- * // { _id: 'Chunk', values: [ 1, 2, 3 ] }
+ * console.log(Chunk.toArray(chunk)) // [1, 2, 3]
  * ```
  *
  * @category constructors
@@ -443,7 +449,8 @@ const toArray_ = <A>(self: Chunk<A>): Array<A> => toReadonlyArray(self).slice()
  * (`NonEmptyChunk`), the function will return a `NonEmptyArray`, ensuring the
  * non-empty property is preserved.
  *
- * @example
+ * **Example** (Converting chunks to mutable arrays)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -457,7 +464,7 @@ const toArray_ = <A>(self: Chunk<A>): Array<A> => toReadonlyArray(self).slice()
  * console.log(Chunk.toArray(emptyChunk)) // []
  * ```
  *
- * @category conversions
+ * @category converting
  * @since 2.0.0
  */
 export const toArray: <S extends Chunk<any>>(
@@ -492,7 +499,8 @@ const toReadonlyArray_ = <A>(self: Chunk<A>): ReadonlyArray<A> => {
  * non-empty (`NonEmptyChunk`), the function will return a
  * `NonEmptyReadonlyArray`, ensuring the non-empty property is preserved.
  *
- * @example
+ * **Example** (Converting chunks to readonly arrays)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -508,7 +516,7 @@ const toReadonlyArray_ = <A>(self: Chunk<A>): ReadonlyArray<A> => {
  * console.log(Chunk.toReadonlyArray(emptyChunk)) // []
  * ```
  *
- * @category conversions
+ * @category converting
  * @since 2.0.0
  */
 export const toReadonlyArray: <S extends Chunk<any>>(
@@ -536,7 +544,7 @@ const reverseChunk = <A>(self: Chunk<A>): Chunk<A> => {
  * Reverses the order of elements in a `Chunk`.
  * Importantly, if the input chunk is a `NonEmptyChunk`, the reversed chunk will also be a `NonEmptyChunk`.
  *
- * @example
+ * **Example** (Reversing chunks)
  *
  * ```ts
  * import { Chunk } from "effect"
@@ -544,19 +552,19 @@ const reverseChunk = <A>(self: Chunk<A>): Chunk<A> => {
  * const chunk = Chunk.make(1, 2, 3)
  * const result = Chunk.reverse(chunk)
  *
- * console.log(result)
- * // { _id: 'Chunk', values: [ 3, 2, 1 ] }
+ * console.log(Chunk.toArray(result)) // [3, 2, 1]
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const reverse: <S extends Chunk<any>>(self: S) => Chunk.With<S, Chunk.Infer<S>> = reverseChunk as any
 
 /**
  * This function provides a safe way to read a value at a particular index from a `Chunk`.
  *
- * @example
+ * **Example** (Accessing elements safely)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -586,7 +594,8 @@ export const get: {
 /**
  * Wraps an array into a chunk without copying, unsafe on mutable arrays
  *
- * @example
+ * **Example** (Creating chunks without copying arrays)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -599,8 +608,8 @@ export const get: {
  * console.log(Chunk.toArray(chunk)) // [999, 2, 3, 4, 5]
  * ```
  *
- * @since 2.0.0
  * @category unsafe
+ * @since 4.0.0
  */
 export const fromArrayUnsafe = <A>(self: ReadonlyArray<A>): Chunk<A> =>
   self.length === 0 ? empty() : self.length === 1 ? of(self[0]) : makeChunk({ _tag: "IArray", array: self })
@@ -608,10 +617,10 @@ export const fromArrayUnsafe = <A>(self: ReadonlyArray<A>): Chunk<A> =>
 /**
  * Wraps an array into a chunk without copying, unsafe on mutable arrays
  *
- * @example
+ * **Example** (Creating non-empty chunks without copying arrays)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Array from "effect/Array"
+ * import { Array, Chunk } from "effect"
  *
  * const nonEmptyArray = Array.make(1, 2, 3, 4, 5)
  * const chunk = Chunk.fromNonEmptyArrayUnsafe(nonEmptyArray)
@@ -621,8 +630,8 @@ export const fromArrayUnsafe = <A>(self: ReadonlyArray<A>): Chunk<A> =>
  * console.log(Chunk.isNonEmpty(chunk)) // true
  * ```
  *
- * @since 2.0.0
  * @category unsafe
+ * @since 4.0.0
  */
 export const fromNonEmptyArrayUnsafe = <A>(self: NonEmptyReadonlyArray<A>): NonEmptyChunk<A> =>
   fromArrayUnsafe(self) as any
@@ -630,25 +639,22 @@ export const fromNonEmptyArrayUnsafe = <A>(self: NonEmptyReadonlyArray<A>): NonE
 /**
  * Gets an element unsafely, will throw on out of bounds
  *
- * @example
+ * **Example** (Accessing elements unsafely)
+ *
  * ```ts
- * import { Chunk } from "effect"
+ * import { Chunk, Option } from "effect"
  *
  * const chunk = Chunk.make("a", "b", "c", "d")
  *
  * console.log(Chunk.getUnsafe(chunk, 1)) // "b"
  * console.log(Chunk.getUnsafe(chunk, 3)) // "d"
  *
- * // Warning: This will throw an error for invalid indices
- * try {
- *   Chunk.getUnsafe(chunk, 10) // throws "Index out of bounds"
- * } catch (error) {
- *   console.log((error as Error).message) // "Index out of bounds"
- * }
+ * // Use Chunk.get when the index may be out of bounds
+ * console.log(Option.isNone(Chunk.get(chunk, 10))) // true
  * ```
  *
- * @since 2.0.0
  * @category unsafe
+ * @since 4.0.0
  */
 export const getUnsafe: {
   (index: number): <A>(self: Chunk<A>) => A
@@ -685,7 +691,8 @@ export const getUnsafe: {
 /**
  * Appends the specified element to the end of the `Chunk`.
  *
- * @example
+ * **Example** (Appending an element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -710,7 +717,8 @@ export const append: {
 /**
  * Prepend an element to the front of a `Chunk`, creating a new `NonEmptyChunk`.
  *
- * @example
+ * **Example** (Prepending an element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -735,14 +743,14 @@ export const prepend: {
 /**
  * Takes the first up to `n` elements from the chunk.
  *
- * @example
+ * **Example** (Taking elements from the start)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.take(chunk, 3)
- * console.log(result)
- * // { _id: 'Chunk', values: [ 1, 2, 3 ] }
+ * console.log(Chunk.toArray(result)) // [1, 2, 3]
  * ```
  *
  * @category elements
@@ -792,14 +800,14 @@ export const take: {
 /**
  * Drops the first up to `n` elements from the chunk.
  *
- * @example
+ * **Example** (Dropping elements from the start)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.drop(chunk, 2)
- * console.log(result)
- * // { _id: 'Chunk', values: [ 3, 4, 5 ] }
+ * console.log(Chunk.toArray(result)) // [3, 4, 5]
  * ```
  *
  * @category elements
@@ -848,14 +856,14 @@ export const drop: {
 /**
  * Drops the last `n` elements.
  *
- * @example
+ * **Example** (Dropping elements from the end)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.dropRight(chunk, 2)
- * console.log(result)
- * // { _id: 'Chunk', values: [ 1, 2, 3 ] }
+ * console.log(Chunk.toArray(result)) // [1, 2, 3]
  * ```
  *
  * @category elements
@@ -869,14 +877,14 @@ export const dropRight: {
 /**
  * Drops all elements so long as the predicate returns true.
  *
- * @example
+ * **Example** (Dropping elements while a predicate matches)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.dropWhile(chunk, (n) => n < 3)
- * console.log(result)
- * // { _id: 'Chunk', values: [ 3, 4, 5 ] }
+ * console.log(Chunk.toArray(result)) // [3, 4, 5]
  * ```
  *
  * @category elements
@@ -899,7 +907,7 @@ export const dropWhile: {
  * Prepends the specified prefix chunk to the beginning of the specified chunk.
  * If either chunk is non-empty, the result is also a non-empty chunk.
  *
- * @example
+ * **Example** (Prepending all elements)
  *
  * ```ts
  * import { Chunk } from "effect"
@@ -929,7 +937,7 @@ export const prependAll: {
  * Concatenates two chunks, combining their elements.
  * If either chunk is non-empty, the result is also a non-empty chunk.
  *
- * @example
+ * **Example** (Appending all elements)
  *
  * ```ts
  * import { Chunk } from "effect"
@@ -997,10 +1005,10 @@ export const appendAll: {
 /**
  * Returns a filtered and mapped subset of the elements.
  *
- * @example
+ * **Example** (Filtering and mapping values)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Result from "effect/Result"
+ * import { Chunk, Result } from "effect"
  *
  * const chunk = Chunk.make("1", "2", "hello", "3", "world")
  * const numbers = Chunk.filterMap(chunk, (str) => {
@@ -1017,8 +1025,8 @@ export const appendAll: {
  * console.log(Chunk.toArray(evenIndexNumbers)) // [1]
  * ```
  *
- * @since 2.0.0
  * @category filtering
+ * @since 2.0.0
  */
 export const filterMap: {
   <A, B, X>(f: (input: A, i: number) => Result<B, X>): (self: Chunk<A>) => Chunk<B>
@@ -1041,7 +1049,8 @@ export const filterMap: {
 /**
  * Returns a filtered subset of the elements.
  *
- * @example
+ * **Example** (Filtering values)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1055,8 +1064,8 @@ export const filterMap: {
  * console.log(Chunk.toArray(numbers)) // [42, 100]
  * ```
  *
- * @since 2.0.0
  * @category filtering
+ * @since 2.0.0
  */
 export const filter: {
   <A, B extends A>(refinement: Refinement<NoInfer<A>, B>): (self: Chunk<A>) => Chunk<B>
@@ -1071,10 +1080,10 @@ export const filter: {
 /**
  * Transforms all elements of the chunk for as long as the specified function succeeds.
  *
- * @example
+ * **Example** (Filtering and mapping while values match)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Result from "effect/Result"
+ * import { Chunk, Result } from "effect"
  *
  * const chunk = Chunk.make("1", "2", "hello", "3", "4")
  * const result = Chunk.filterMapWhile(chunk, (s) => {
@@ -1092,8 +1101,8 @@ export const filter: {
  * console.log(Chunk.toArray(allNumbers)) // [1, 2, 3, 4]
  * ```
  *
- * @since 2.0.0
  * @category filtering
+ * @since 2.0.0
  */
 export const filterMapWhile: {
   <A, B, X>(f: Filter.Filter<A, B, X>): (self: Chunk<A>) => Chunk<B>
@@ -1114,15 +1123,14 @@ export const filterMapWhile: {
 /**
  * Filter out optional values
  *
- * @example
+ * **Example** (Compacting optional values)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Option from "effect/Option"
+ * import { Chunk, Option } from "effect"
  *
  * const chunk = Chunk.make(Option.some(1), Option.none(), Option.some(3))
  * const result = Chunk.compact(chunk)
- * console.log(result)
- * // { _id: 'Chunk', values: [ 1, 3 ] }
+ * console.log(Chunk.toArray(result)) // [1, 3]
  * ```
  *
  * @category filtering
@@ -1141,7 +1149,8 @@ export const compact = <A>(self: Chunk<Option<A>>): Chunk<A> => {
 /**
  * Applies a function to each element in a chunk and returns a new chunk containing the concatenated mapped elements.
  *
- * @example
+ * **Example** (Flat mapping chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1162,8 +1171,8 @@ export const compact = <A>(self: Chunk<Option<A>>): Chunk<A> => {
  * console.log(Chunk.toArray(indexed)) // [1, 3, 5]
  * ```
  *
- * @since 2.0.0
  * @category sequencing
+ * @since 2.0.0
  */
 export const flatMap: {
   <S extends Chunk<any>, T extends Chunk<any>>(
@@ -1193,7 +1202,8 @@ export const flatMap: {
  * instead, it is primarily used for side effects, such as logging or
  * accumulating data in an external variable.
  *
- * @example
+ * **Example** (Iterating over chunk values)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1216,8 +1226,8 @@ export const flatMap: {
  * // Index 3: 4
  * ```
  *
- * @since 2.0.0
  * @category combinators
+ * @since 2.0.0
  */
 export const forEach: {
   <A, B>(f: (a: A, index: number) => B): (self: Chunk<A>) => void
@@ -1227,7 +1237,8 @@ export const forEach: {
 /**
  * Flattens a chunk of chunks into a single chunk by concatenating all chunks.
  *
- * @example
+ * **Example** (Flattening nested chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1248,15 +1259,16 @@ export const forEach: {
  * console.log(Chunk.toArray(Chunk.flatten(withEmpty))) // [1, 2, 3, 4]
  * ```
  *
- * @since 2.0.0
  * @category sequencing
+ * @since 2.0.0
  */
 export const flatten: <S extends Chunk<Chunk<any>>>(self: S) => Chunk.Flatten<S> = flatMap(identity) as any
 
 /**
  * Groups elements in chunks of up to `n` elements.
  *
- * @example
+ * **Example** (Splitting into fixed-size chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1273,8 +1285,8 @@ export const flatten: <S extends Chunk<Chunk<any>>>(self: S) => Chunk.Flatten<S>
  * // [[1, 2], [3, 4], [5]]
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const chunksOf: {
   (n: number): <A>(self: Chunk<A>) => Chunk<Chunk<A>>
@@ -1296,11 +1308,14 @@ export const chunksOf: {
 })
 
 /**
- * Creates a Chunk of unique values that are included in all given Chunks.
+ * Creates a `Chunk` of values that are included in both chunks.
  *
- * The order and references of result values are determined by the Chunk.
+ * **Details**
  *
- * @example
+ * The order and references of result values are determined by the first chunk.
+ *
+ * **Example** (Intersecting chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1320,8 +1335,8 @@ export const chunksOf: {
  * console.log(Chunk.toArray(Chunk.intersection(chunk3, chunk4))) // []
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const intersection: {
   <A>(that: Chunk<A>): <B>(self: Chunk<B>) => Chunk<A & B>
@@ -1335,7 +1350,8 @@ export const intersection: {
 /**
  * Determines if the chunk is empty.
  *
- * @example
+ * **Example** (Checking for empty chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1351,7 +1367,8 @@ export const isEmpty = <A>(self: Chunk<A>): boolean => self.length === 0
 /**
  * Determines if the chunk is not empty.
  *
- * @example
+ * **Example** (Checking for non-empty chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1367,7 +1384,8 @@ export const isNonEmpty = <A>(self: Chunk<A>): self is NonEmptyChunk<A> => self.
 /**
  * Returns the first element of this chunk if it exists.
  *
- * @example
+ * **Example** (Getting the first element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1383,11 +1401,14 @@ export const head: <A>(self: Chunk<A>) => Option<A> = get(0)
 /**
  * Returns the first element of this chunk.
  *
- * It will throw an error if the chunk is empty.
+ * **Gotchas**
  *
- * @example
+ * Throws an error if the chunk is empty.
+ *
+ * **Example** (Getting the first element unsafely)
+ *
  * ```ts
- * import { Chunk } from "effect"
+ * import { Chunk, Option } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4)
  * console.log(Chunk.headUnsafe(chunk)) // 1
@@ -1395,23 +1416,20 @@ export const head: <A>(self: Chunk<A>) => Option<A> = get(0)
  * const singleElement = Chunk.make("hello")
  * console.log(Chunk.headUnsafe(singleElement)) // "hello"
  *
- * // Warning: This will throw for empty chunks
- * try {
- *   Chunk.headUnsafe(Chunk.empty())
- * } catch (error) {
- *   console.log((error as Error).message) // "Index out of bounds"
- * }
+ * // Use Chunk.head when the chunk may be empty
+ * console.log(Option.isNone(Chunk.head(Chunk.empty()))) // true
  * ```
  *
- * @since 2.0.0
  * @category unsafe
+ * @since 4.0.0
  */
 export const headUnsafe = <A>(self: Chunk<A>): A => getUnsafe(self, 0)
 
 /**
  * Returns the first element of this non empty chunk.
  *
- * @example
+ * **Example** (Getting the first element of a non-empty chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1425,15 +1443,16 @@ export const headUnsafe = <A>(self: Chunk<A>): A => getUnsafe(self, 0)
  * // Chunk.headNonEmpty(Chunk.empty()) // TypeScript error
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const headNonEmpty: <A>(self: NonEmptyChunk<A>) => A = headUnsafe
 
 /**
  * Returns the last element of this chunk if it exists.
  *
- * @example
+ * **Example** (Getting the last element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1449,11 +1468,14 @@ export const last = <A>(self: Chunk<A>): Option<A> => get(self, self.length - 1)
 /**
  * Returns the last element of this chunk.
  *
- * It will throw an error if the chunk is empty.
+ * **Gotchas**
  *
- * @example
+ * Throws an error if the chunk is empty.
+ *
+ * **Example** (Getting the last element unsafely)
+ *
  * ```ts
- * import { Chunk } from "effect"
+ * import { Chunk, Option } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4)
  * console.log(Chunk.lastUnsafe(chunk)) // 4
@@ -1461,23 +1483,20 @@ export const last = <A>(self: Chunk<A>): Option<A> => get(self, self.length - 1)
  * const singleElement = Chunk.make("hello")
  * console.log(Chunk.lastUnsafe(singleElement)) // "hello"
  *
- * // Warning: This will throw for empty chunks
- * try {
- *   Chunk.lastUnsafe(Chunk.empty())
- * } catch (error) {
- *   console.log((error as Error).message) // "Index out of bounds"
- * }
+ * // Use Chunk.last when the chunk may be empty
+ * console.log(Option.isNone(Chunk.last(Chunk.empty()))) // true
  * ```
  *
- * @since 2.0.0
  * @category unsafe
+ * @since 4.0.0
  */
 export const lastUnsafe = <A>(self: Chunk<A>): A => getUnsafe(self, self.length - 1)
 
 /**
  * Returns the last element of this non empty chunk.
  *
- * @example
+ * **Example** (Getting the last element of a non-empty chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1491,15 +1510,16 @@ export const lastUnsafe = <A>(self: Chunk<A>): A => getUnsafe(self, self.length 
  * // Chunk.lastNonEmpty(Chunk.empty()) // TypeScript error
  * ```
  *
- * @since 3.4.0
  * @category elements
+ * @since 3.4.0
  */
 export const lastNonEmpty: <A>(self: NonEmptyChunk<A>) => A = lastUnsafe
 
 /**
  * A namespace containing utility types for Chunk operations.
  *
- * @example
+ * **Example** (Working with Chunk utility types)
+ *
  * ```ts
  * import type { Chunk } from "effect"
  *
@@ -1512,14 +1532,14 @@ export const lastNonEmpty: <A>(self: NonEmptyChunk<A>) => A = lastUnsafe
  * type WithString = Chunk.Chunk.With<typeof nonEmptyChunk, string> // Chunk.NonEmptyChunk<string>
  * ```
  *
- * @category types
  * @since 2.0.0
  */
 export declare namespace Chunk {
   /**
    * Infers the element type of a Chunk.
    *
-   * @example
+   * **Example** (Inferring element types)
+   *
    * ```ts
    * import type { Chunk } from "effect"
    *
@@ -1538,7 +1558,8 @@ export declare namespace Chunk {
   /**
    * Constructs a Chunk type preserving non-emptiness.
    *
-   * @example
+   * **Example** (Preserving non-emptiness)
+   *
    * ```ts
    * import type { Chunk } from "effect"
    *
@@ -1557,7 +1578,8 @@ export declare namespace Chunk {
   /**
    * Creates a non-empty Chunk if either input is non-empty.
    *
-   * @example
+   * **Example** (Preserving non-emptiness from either input)
+   *
    * ```ts
    * import type { Chunk } from "effect"
    *
@@ -1592,7 +1614,8 @@ export declare namespace Chunk {
   /**
    * Creates a non-empty Chunk only if both inputs are non-empty.
    *
-   * @example
+   * **Example** (Requiring non-emptiness from both inputs)
+   *
    * ```ts
    * import type { Chunk } from "effect"
    *
@@ -1627,7 +1650,8 @@ export declare namespace Chunk {
   /**
    * Flattens a nested Chunk type.
    *
-   * @example
+   * **Example** (Flattening nested chunk types)
+   *
    * ```ts
    * import type { Chunk } from "effect"
    *
@@ -1650,19 +1674,18 @@ export declare namespace Chunk {
  * Transforms the elements of a chunk using the specified mapping function.
  * If the input chunk is non-empty, the resulting chunk will also be non-empty.
  *
- * @example
+ * **Example** (Mapping values)
  *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const result = Chunk.map(Chunk.make(1, 2), (n) => n + 1)
  *
- * console.log(result)
- * // { _id: 'Chunk', values: [ 2, 3 ] }
+ * console.log(Chunk.toArray(result)) // [2, 3]
  * ```
  *
- * @since 2.0.0
  * @category mapping
+ * @since 2.0.0
  */
 export const map: {
   <S extends Chunk<any>, B>(f: (a: Chunk.Infer<S>, i: number) => B): (self: S) => Chunk.With<S, B>
@@ -1676,7 +1699,8 @@ export const map: {
 /**
  * Statefully maps over the chunk, producing new elements of type `B`.
  *
- * @example
+ * **Example** (Mapping with accumulated state)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1699,8 +1723,8 @@ export const map: {
  * console.log(Chunk.toArray(indexed)) // ["0: hello", "1: world", "2: effect"]
  * ```
  *
- * @since 2.0.0
  * @category folding
+ * @since 2.0.0
  */
 export const mapAccum: {
   <S, A, B>(s: S, f: (s: S, a: A) => readonly [S, B]): (self: Chunk<A>) => [S, Chunk<B>]
@@ -1713,10 +1737,12 @@ export const mapAccum: {
 /**
  * Splits a chunk using a `Filter` into failures and successes.
  *
- * - Returns `[excluded, satisfying]`.
- * - The filter receives `(element, index)`.
+ * **Details**
  *
- * @example
+ * Returns `[excluded, satisfying]`. The filter receives `(element, index)`.
+ *
+ * **Example** (Partitioning with a Result)
+ *
  * ```ts
  * import { Chunk, Result } from "effect"
  *
@@ -1751,12 +1777,18 @@ export const partition: {
 )
 
 /**
- * Partitions the elements of this chunk into two chunks.
+ * Separates a chunk of `Result` values into a chunk of failures and a chunk of
+ * successes.
  *
- * @example
+ * **Details**
+ *
+ * The returned tuple is `[failures, successes]`, preserving the original order
+ * within each side.
+ *
+ * **Example** (Separating failures and successes)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Result from "effect/Result"
+ * import { Chunk, Result } from "effect"
  *
  * const chunk = Chunk.make(
  *   Result.succeed(1),
@@ -1789,7 +1821,8 @@ export const separate = <A, B>(self: Chunk<Result<B, A>>): [Chunk<A>, Chunk<B>] 
 /**
  * Retrieves the size of the chunk.
  *
- * @example
+ * **Example** (Getting chunk size)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1805,10 +1838,10 @@ export const size = <A>(self: Chunk<A>): number => self.length
 /**
  * Sort the elements of a Chunk in increasing order, creating a new Chunk.
  *
- * @example
+ * **Example** (Sorting chunks)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Order from "effect/Order"
+ * import { Chunk, Order } from "effect"
  *
  * const numbers = Chunk.make(3, 1, 4, 1, 5, 9, 2, 6)
  * const sorted = Chunk.sort(numbers, Order.Number)
@@ -1824,8 +1857,8 @@ export const size = <A>(self: Chunk<A>): number => self.length
  * console.log(Chunk.toArray(sortedWords)) // ["apple", "banana", "cherry"]
  * ```
  *
- * @since 2.0.0
  * @category sorting
+ * @since 2.0.0
  */
 export const sort: {
   <B>(O: Order.Order<B>): <A extends B>(self: Chunk<A>) => Chunk<A>
@@ -1838,10 +1871,10 @@ export const sort: {
 /**
  * Sorts the elements of a Chunk based on a projection function.
  *
- * @example
+ * **Example** (Sorting chunks by a derived value)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Order from "effect/Order"
+ * import { Chunk, Order } from "effect"
  *
  * const people = Chunk.make(
  *   { name: "Alice", age: 30 },
@@ -1865,8 +1898,8 @@ export const sort: {
  * console.log(Chunk.toArray(byLength)) // ["a", "ab", "abc"]
  * ```
  *
- * @since 2.0.0
  * @category sorting
+ * @since 2.0.0
  */
 export const sortWith: {
   <A, B>(f: (a: A) => B, order: Order.Order<B>): (self: Chunk<A>) => Chunk<A>
@@ -1879,7 +1912,8 @@ export const sortWith: {
 /**
  *  Returns two splits of this chunk at the specified index.
  *
- * @example
+ * **Example** (Splitting at an index)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1899,8 +1933,8 @@ export const sortWith: {
  * console.log(Chunk.toArray(empty2)) // []
  * ```
  *
- * @since 2.0.0
  * @category splitting
+ * @since 2.0.0
  */
 export const splitAt: {
   (n: number): <A>(self: Chunk<A>) => [beforeIndex: Chunk<A>, fromIndex: Chunk<A>]
@@ -1908,10 +1942,17 @@ export const splitAt: {
 } = dual(2, <A>(self: Chunk<A>, n: number): [Chunk<A>, Chunk<A>] => [take(self, n), drop(self, n)])
 
 /**
- * Splits a `NonEmptyChunk` into two segments, with the first segment containing a maximum of `n` elements.
- * The value of `n` must be `>= 1`.
+ * Splits a `NonEmptyChunk` at `n`, returning a non-empty prefix and the
+ * remaining suffix.
  *
- * @example
+ * **Details**
+ *
+ * `n` is floored and normalized to at least `1`. If `n` is greater than or
+ * equal to the chunk length, the first result is the original chunk and the
+ * second result is empty.
+ *
+ * **Example** (Splitting non-empty chunks at an index)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1943,9 +1984,15 @@ export const splitNonEmptyAt: {
 })
 
 /**
- * Splits this chunk into `n` equally sized chunks.
+ * Splits a chunk into up to `n` chunks, distributing elements in order.
  *
- * @example
+ * **Details**
+ *
+ * The chunk size is derived from the input length and `n`; the final chunk may
+ * contain fewer elements than the others.
+ *
+ * **Example** (Splitting chunks into groups)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -1966,8 +2013,8 @@ export const splitNonEmptyAt: {
  * // [[1, 2, 3, 4, 5, 6, 7, 8, 9]]
  * ```
  *
- * @since 2.0.0
  * @category splitting
+ * @since 2.0.0
  */
 export const split: {
   (n: number): <A>(self: Chunk<A>) => Chunk<Chunk<A>>
@@ -1978,7 +2025,8 @@ export const split: {
  * Splits this chunk on the first element that matches this predicate.
  * Returns a tuple containing two chunks: the first one is before the match, and the second one is from the match onward.
  *
- * @example
+ * **Example** (Splitting at a matching element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2019,7 +2067,8 @@ export const splitWhere: {
 /**
  * Returns every elements after the first.
  *
- * @example
+ * **Example** (Getting the tail safely)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2033,15 +2082,16 @@ export const splitWhere: {
  * console.log(Chunk.tail(empty)) // Option.none()
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
-export const tail = <A>(self: Chunk<A>): Chunk<A> | undefined => self.length > 0 ? drop(self, 1) : undefined
+export const tail = <A>(self: Chunk<A>): O.Option<Chunk<A>> => self.length > 0 ? O.some(drop(self, 1)) : O.none()
 
 /**
  * Returns every elements after the first.
  *
- * @example
+ * **Example** (Getting the tail of a non-empty chunk)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2057,15 +2107,16 @@ export const tail = <A>(self: Chunk<A>): Chunk<A> | undefined => self.length > 0
  * // Chunk.tailNonEmpty(Chunk.empty()) // TypeScript error
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const tailNonEmpty = <A>(self: NonEmptyChunk<A>): Chunk<A> => drop(self, 1)
 
 /**
  * Takes the last `n` elements.
  *
- * @example
+ * **Example** (Taking elements from the end)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2082,8 +2133,8 @@ export const tailNonEmpty = <A>(self: NonEmptyChunk<A>): Chunk<A> => drop(self, 
  * console.log(Chunk.toArray(none)) // []
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const takeRight: {
   (n: number): <A>(self: Chunk<A>) => Chunk<A>
@@ -2093,7 +2144,8 @@ export const takeRight: {
 /**
  * Takes all elements so long as the predicate returns true.
  *
- * @example
+ * **Example** (Taking elements while a predicate matches)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2111,8 +2163,8 @@ export const takeRight: {
  * console.log(Chunk.toArray(all)) // [1, 2, 3]
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const takeWhile: {
   <A, B extends A>(refinement: Refinement<NoInfer<A>, B>): (self: Chunk<A>) => Chunk<B>
@@ -2134,7 +2186,8 @@ export const takeWhile: {
 /**
  * Creates a Chunks of unique values, in order, from all given Chunks.
  *
- * @example
+ * **Example** (Unioning chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2150,8 +2203,8 @@ export const takeWhile: {
  * console.log(Chunk.toArray(unified)) // [1, 2, 3]
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const union: {
   <A>(that: Chunk<A>): <B>(self: Chunk<B>) => Chunk<A | B>
@@ -2162,9 +2215,11 @@ export const union: {
 )
 
 /**
- * Remove duplicates from an array, keeping the first occurrence of an element.
+ * Removes duplicate elements from a `Chunk`, preserving the first occurrence
+ * of each value.
  *
- * @example
+ * **Example** (Removing duplicate values)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2183,15 +2238,16 @@ export const union: {
  * console.log(Chunk.toArray(uniqueDeduped)) // [1, 2, 3]
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const dedupe = <A>(self: Chunk<A>): Chunk<A> => fromArrayUnsafe(RA.dedupe(toReadonlyArray(self)))
 
 /**
  * Deduplicates adjacent elements that are identical.
  *
- * @example
+ * **Example** (Removing adjacent duplicates)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2205,17 +2261,20 @@ export const dedupe = <A>(self: Chunk<A>): Chunk<A> => fromArrayUnsafe(RA.dedupe
  * console.log(Chunk.toArray(mixedResult)) // ["a", "b", "a"]
  * ```
  *
- * @since 2.0.0
  * @category filtering
+ * @since 2.0.0
  */
 export const dedupeAdjacent = <A>(self: Chunk<A>): Chunk<A> => fromArrayUnsafe(RA.dedupeAdjacent(self))
 
 /**
- * Takes a `Chunk` of pairs and return two corresponding `Chunk`s.
+ * Takes a `Chunk` of pairs and returns two corresponding `Chunk`s.
  *
- * Note: The function is reverse of `zip`.
+ * **Details**
  *
- * @example
+ * This function is the reverse of `zip`.
+ *
+ * **Example** (Unzipping pairs)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2235,8 +2294,8 @@ export const dedupeAdjacent = <A>(self: Chunk<A>): Chunk<A> => fromArrayUnsafe(R
  * console.log(Chunk.toArray(emptyStrs)) // []
  * ```
  *
- * @since 2.0.0
  * @category elements
+ * @since 2.0.0
  */
 export const unzip = <A, B>(self: Chunk<readonly [A, B]>): [Chunk<A>, Chunk<B>] => {
   const [left, right] = RA.unzip(self)
@@ -2246,7 +2305,8 @@ export const unzip = <A, B>(self: Chunk<readonly [A, B]>): [Chunk<A>, Chunk<B>] 
 /**
  * Zips this chunk pointwise with the specified chunk using the specified combiner.
  *
- * @example
+ * **Example** (Zipping chunks with a function)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2262,8 +2322,8 @@ export const unzip = <A, B>(self: Chunk<readonly [A, B]>): [Chunk<A>, Chunk<B>] 
  * console.log(Chunk.toArray(mixed)) // [[1, "a"], [2, "b"]]
  * ```
  *
- * @since 2.0.0
  * @category zipping
+ * @since 2.0.0
  */
 export const zipWith: {
   <A, B, C>(that: Chunk<B>, f: (a: A, b: B) => C): (self: Chunk<A>) => Chunk<C>
@@ -2277,7 +2337,8 @@ export const zipWith: {
 /**
  * Zips this chunk pointwise with the specified chunk.
  *
- * @example
+ * **Example** (Zipping chunks)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2293,8 +2354,8 @@ export const zipWith: {
  * console.log(Chunk.toArray(zipped)) // [[1, "a"], [2, "b"]]
  * ```
  *
- * @since 2.0.0
  * @category zipping
+ * @since 2.0.0
  */
 export const zip: {
   <B>(that: Chunk<B>): <A>(self: Chunk<A>) => Chunk<[A, B]>
@@ -2307,7 +2368,8 @@ export const zip: {
 /**
  * Delete the element at the specified index, creating a new `Chunk`.
  *
- * @example
+ * **Example** (Removing an element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2339,76 +2401,80 @@ export const remove: {
  * Applies a function to the element at the specified index, creating a new `Chunk`,
  * or returns `None` if the index is out of bounds.
  *
- * @example
+ * **Example** (Modifying an element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4)
  * const result = Chunk.modify(chunk, 1, (n) => n * 10)
- * console.log(result) // { _id: 'Chunk', values: [ 1, 20, 3, 4 ] }
+ * console.log(result) // Option.some(Chunk.make(1, 20, 3, 4))
  *
  * // Index out of bounds returns None
- * const outOfBounds = chunk?.pipe(Chunk.modify(10, (n) => n * 10))
- * console.log(outOfBounds === undefined) // true
+ * const outOfBounds = chunk.pipe(Chunk.modify(10, (n) => n * 10))
+ * console.log(outOfBounds) // Option.none()
  *
  * // Negative index returns None
- * const negative = chunk?.pipe(Chunk.modify(-1, (n) => n * 10))
- * console.log(negative === undefined) // true
+ * const negative = chunk.pipe(Chunk.modify(-1, (n) => n * 10))
+ * console.log(negative) // Option.none()
  * ```
  *
  * @category elements
  * @since 2.0.0
  */
 export const modify: {
-  <A, B>(i: number, f: (a: A) => B): (self: Chunk<A>) => Chunk<A | B> | undefined
-  <A, B>(self: Chunk<A>, i: number, f: (a: A) => B): Chunk<A | B> | undefined
+  <A, B>(i: number, f: (a: A) => B): (self: Chunk<A>) => O.Option<Chunk<A | B>>
+  <A, B>(self: Chunk<A>, i: number, f: (a: A) => B): O.Option<Chunk<A | B>>
 } = dual(
   3,
-  <A, B>(self: Chunk<A>, i: number, f: (a: A) => B): Chunk<A | B> | undefined =>
-    UndefinedOr.map(RA.modify(toReadonlyArray(self), i, f), fromArrayUnsafe)
+  <A, B>(self: Chunk<A>, i: number, f: (a: A) => B): O.Option<Chunk<A | B>> =>
+    pipe(RA.modify(toReadonlyArray(self), i, f), O.map(fromArrayUnsafe))
 )
 
 /**
  * Change the element at the specified index, creating a new `Chunk`,
  * or returns `None` if the index is out of bounds.
  *
- * @example
+ * **Example** (Replacing an element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make("a", "b", "c", "d")
  * const result = Chunk.replace(chunk, 1, "X")
- * console.log(result) // { _id: 'Chunk', values: [ 'a', 'X', 'c', 'd' ] }
+ * console.log(result) // Option.some(Chunk.make("a", "X", "c", "d"))
  *
  * // Index out of bounds returns None
- * const outOfBounds = chunk?.pipe(Chunk.replace(10, "Y"))
- * console.log(outOfBounds === undefined) // true
+ * const outOfBounds = chunk.pipe(Chunk.replace(10, "Y"))
+ * console.log(outOfBounds) // Option.none()
  *
  * // Negative index returns None
- * const negative = chunk?.pipe(Chunk.replace(-1, "Z"))
- * console.log(negative === undefined) // true
+ * const negative = chunk.pipe(Chunk.replace(-1, "Z"))
+ * console.log(negative) // Option.none()
  * ```
  *
  * @category elements
  * @since 2.0.0
  */
 export const replace: {
-  <B>(i: number, b: B): <A>(self: Chunk<A>) => Chunk<B | A> | undefined
-  <A, B>(self: Chunk<A>, i: number, b: B): Chunk<B | A> | undefined
-} = dual(3, <A, B>(self: Chunk<A>, i: number, b: B): Chunk<B | A> | undefined => modify(self, i, () => b))
+  <B>(i: number, b: B): <A>(self: Chunk<A>) => O.Option<Chunk<B | A>>
+  <A, B>(self: Chunk<A>, i: number, b: B): O.Option<Chunk<B | A>>
+} = dual(3, <A, B>(self: Chunk<A>, i: number, b: B): O.Option<Chunk<B | A>> => modify(self, i, () => b))
 
 /**
- * Return a Chunk of length n with element i initialized with f(i).
+ * Returns a non-empty `Chunk` of length `n` with element `i` initialized by `f(i)`.
  *
- * **Note**. `n` is normalized to an integer >= 1.
+ * **Details**
  *
- * @example
+ * `n` is normalized to an integer greater than or equal to `1`.
+ *
+ * **Example** (Generating chunks from indices)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.makeBy(5, (i) => i * 2)
- * console.log(chunk)
- * // { _id: 'Chunk', values: [ 0, 2, 4, 6, 8 ] }
+ * console.log(Chunk.toArray(chunk)) // [0, 2, 4, 6, 8]
  * ```
  *
  * @category constructors
@@ -2420,15 +2486,21 @@ export const makeBy: {
 } = dual(2, (n, f) => fromIterable(RA.makeBy(n, f)))
 
 /**
- * Create a non empty `Chunk` containing a range of integers, including both endpoints.
+ * Creates a non-empty `Chunk` of consecutive integers from `start` through
+ * `end`, inclusive.
  *
- * @example
+ * **Details**
+ *
+ * If `start` is greater than `end`, returns a single-element chunk containing
+ * `start`.
+ *
+ * **Example** (Creating a range)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.range(1, 5)
- * console.log(chunk)
- * // { _id: 'Chunk', values: [ 1, 2, 3, 4, 5 ] }
+ * console.log(Chunk.toArray(chunk)) // [1, 2, 3, 4, 5]
  * ```
  *
  * @category constructors
@@ -2444,7 +2516,8 @@ export const range = (start: number, end: number): NonEmptyChunk<number> =>
 /**
  * Returns a function that checks if a `Chunk` contains a given value using the default `Equivalence`.
  *
- * @example
+ * **Example** (Checking membership)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2473,7 +2546,8 @@ export const contains: {
 /**
  * Returns a function that checks if a `Chunk` contains a given value using a provided `isEquivalent` function.
  *
- * @example
+ * **Example** (Checking membership with custom equivalence)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2509,7 +2583,8 @@ export const containsWith: <A>(
  * Returns the first element that satisfies the specified
  * predicate, or `None` if no such element exists.
  *
- * @example
+ * **Example** (Finding the first matching element)
+ *
  * ```ts
  * import { Chunk, Option } from "effect"
  *
@@ -2544,38 +2619,42 @@ export const findFirst: {
 /**
  * Return the first index for which a predicate holds.
  *
- * @example
+ * **Example** (Finding the first matching index)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.findFirstIndex(chunk, (n) => n > 3)
- * console.log(result) // 3
+ * console.log(result) // Option.some(3)
  *
  * // No match found
  * const notFound = Chunk.findFirstIndex(chunk, (n) => n > 10)
- * console.log(notFound) // undefined
+ * console.log(notFound) // Option.none()
  *
  * // Find first even number
  * const firstEven = Chunk.findFirstIndex(chunk, (n) => n % 2 === 0)
- * console.log(firstEven) // 1
+ * console.log(firstEven) // Option.some(1)
  * ```
  *
  * @category elements
  * @since 2.0.0
  */
 export const findFirstIndex: {
-  <A>(predicate: Predicate<A>): (self: Chunk<A>) => number | undefined
-  <A>(self: Chunk<A>, predicate: Predicate<A>): number | undefined
-} = RA.findFirstIndex
+  <A>(predicate: Predicate<A>): (self: Chunk<A>) => O.Option<number>
+  <A>(self: Chunk<A>, predicate: Predicate<A>): O.Option<number>
+} = dual(
+  2,
+  <A>(self: Chunk<A>, predicate: Predicate<A>): O.Option<number> => RA.findFirstIndex(self, predicate)
+)
 
 /**
  * Find the last element for which a predicate holds.
  *
- * @example
+ * **Example** (Finding the last matching element)
+ *
  * ```ts
- * import { Chunk } from "effect"
- * import * as Option from "effect/Option"
+ * import { Chunk, Option } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.findLast(chunk, (n) => n < 4)
@@ -2604,35 +2683,40 @@ export const findLast: {
 /**
  * Return the last index for which a predicate holds.
  *
- * @example
+ * **Example** (Finding the last matching index)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
  * const chunk = Chunk.make(1, 2, 3, 4, 5)
  * const result = Chunk.findLastIndex(chunk, (n) => n < 4)
- * console.log(result) // 2
+ * console.log(result) // Option.some(2)
  *
  * // No match found
  * const notFound = Chunk.findLastIndex(chunk, (n) => n > 10)
- * console.log(notFound) // undefined
+ * console.log(notFound) // Option.none()
  *
  * // Find last even number index
  * const lastEven = Chunk.findLastIndex(chunk, (n) => n % 2 === 0)
- * console.log(lastEven) // 3
+ * console.log(lastEven) // Option.some(3)
  * ```
  *
  * @category elements
  * @since 2.0.0
  */
 export const findLastIndex: {
-  <A>(predicate: Predicate<A>): (self: Chunk<A>) => number | undefined
-  <A>(self: Chunk<A>, predicate: Predicate<A>): number | undefined
-} = RA.findLastIndex
+  <A>(predicate: Predicate<A>): (self: Chunk<A>) => O.Option<number>
+  <A>(self: Chunk<A>, predicate: Predicate<A>): O.Option<number>
+} = dual(
+  2,
+  <A>(self: Chunk<A>, predicate: Predicate<A>): O.Option<number> => RA.findLastIndex(self, predicate)
+)
 
 /**
  * Check if a predicate holds true for every `Chunk` element.
  *
- * @example
+ * **Example** (Checking every element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2669,7 +2753,8 @@ export const every: {
 /**
  * Check if a predicate holds true for some `Chunk` element.
  *
- * @example
+ * **Example** (Checking for some matching element)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2700,7 +2785,8 @@ export const some: {
 /**
  * Joins the elements together with "sep" in the middle.
  *
- * @example
+ * **Example** (Joining chunks into a string)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2732,7 +2818,8 @@ export const join: {
 /**
  * Reduces the elements of a chunk from left to right.
  *
- * @example
+ * **Example** (Reducing from the left)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2761,7 +2848,8 @@ export const reduce: {
 /**
  * Reduces the elements of a chunk from right to left.
  *
- * @example
+ * **Example** (Reducing from the right)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2795,7 +2883,8 @@ export const reduceRight: {
  * Creates a `Chunk` of values not included in the other given `Chunk` using the provided `isEquivalent` function.
  * The order and references of result values are determined by the first `Chunk`.
  *
- * @example
+ * **Example** (Computing difference with custom equivalence)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *
@@ -2836,7 +2925,8 @@ export const differenceWith = <A>(isEquivalent: (self: A, that: A) => boolean): 
  * Creates a `Chunk` of values not included in the other given `Chunk`.
  * The order and references of result values are determined by the first `Chunk`.
  *
- * @example
+ * **Example** (Computing chunk difference)
+ *
  * ```ts
  * import { Chunk } from "effect"
  *

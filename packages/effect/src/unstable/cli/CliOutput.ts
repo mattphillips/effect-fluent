@@ -1,9 +1,31 @@
 /**
+ * The `CliOutput` module provides the formatting service used by Effect CLI
+ * applications to turn parsed CLI metadata and failures into terminal text.
+ * It renders help documents, parser errors, grouped errors, and version output,
+ * while allowing applications and tests to replace the formatter through a
+ * `Context` service or `Layer`.
+ *
+ * **Common tasks**
+ *
+ * - Render generated {@link HelpDoc} values for `--help` output
+ * - Display parser failures and validation errors from CLI programs
+ * - Customize output for plain text, colored terminals, tests, or alternate
+ *   formats
+ * - Format version strings consistently with the rest of CLI output
+ *
+ * **Gotchas**
+ *
+ * - Color output is auto-detected from `process.stdout.isTTY` and `NO_COLOR`,
+ *   but can be forced with {@link defaultFormatter}
+ * - Help tables measure visible width after stripping ANSI escape codes, so
+ *   colored output stays aligned with plain output
+ *
  * @since 4.0.0
  */
 
+import * as Context from "../../Context.ts"
 import * as Layer from "../../Layer.ts"
-import * as ServiceMap from "../../ServiceMap.ts"
+import * as Option from "../../Option.ts"
 import type * as CliError from "./CliError.ts"
 import type { HelpDoc } from "./HelpDoc.ts"
 
@@ -11,7 +33,8 @@ import type { HelpDoc } from "./HelpDoc.ts"
  * Service interface for formatting CLI output including help, errors, and version info.
  * This allows customization of output formatting, including color support.
  *
- * @example
+ * **Example** (Customizing CLI output formatting)
+ *
  * ```ts
  * import { Effect } from "effect"
  * import { CliOutput } from "effect/unstable/cli"
@@ -35,17 +58,19 @@ import type { HelpDoc } from "./HelpDoc.ts"
  * )
  * ```
  *
- * @since 4.0.0
  * @category models
+ * @since 4.0.0
  */
 export interface Formatter {
   /**
    * Formats a HelpDoc structure into a readable string format.
    *
-   * @example
+   * **Example** (Formatting help documents)
+   *
    * ```ts
-   * import type { HelpDoc } from "effect/unstable/cli"
+   * import { Option as O } from "effect"
    * import { CliOutput } from "effect/unstable/cli"
+   * import type { HelpDoc } from "effect/unstable/cli"
    *
    * const helpDoc: HelpDoc = {
    *   usage: "myapp [options] <file>",
@@ -55,7 +80,7 @@ export interface Formatter {
    *       name: "verbose",
    *       aliases: ["-v"],
    *       type: "boolean",
-   *       description: "Enable verbose output",
+   *       description: O.some("Enable verbose output"),
    *       required: false
    *     }
    *   ],
@@ -63,7 +88,7 @@ export interface Formatter {
    *     {
    *       name: "file",
    *       type: "string",
-   *       description: "Input file to process",
+   *       description: O.some("Input file to process"),
    *       required: true,
    *       variadic: false
    *     }
@@ -83,9 +108,10 @@ export interface Formatter {
   /**
    * Formats a CLI error for display. Default implementation mirrors the error message.
    *
-   * @example
+   * **Example** (Formatting CLI errors)
+   *
    * ```ts
-   * import * as Data from "effect/Data"
+   * import { Data } from "effect"
    * import { CliOutput } from "effect/unstable/cli"
    *
    * class InvalidOption extends Data.TaggedError("InvalidOption")<{
@@ -105,9 +131,10 @@ export interface Formatter {
   /**
    * Formats an error section with proper styling and color reset.
    *
-   * @example
+   * **Example** (Formatting error sections)
+   *
    * ```ts
-   * import * as Data from "effect/Data"
+   * import { Data } from "effect"
    * import { CliOutput } from "effect/unstable/cli"
    *
    * class ValidationError extends Data.TaggedError("ValidationError")<{
@@ -133,7 +160,8 @@ export interface Formatter {
   /**
    * Formats version output for display.
    *
-   * @example
+   * **Example** (Formatting version output)
+   *
    * ```ts
    * import { CliOutput } from "effect/unstable/cli"
    *
@@ -157,7 +185,8 @@ export interface Formatter {
   /**
    * Formats multiple CLI errors for display, grouping by error type.
    *
-   * @example
+   * **Example** (Formatting grouped errors)
+   *
    * ```ts
    * import { CliError, CliOutput } from "effect/unstable/cli"
    *
@@ -185,9 +214,10 @@ export interface Formatter {
  * Service reference for the CLI output formatter. Provides a default implementation
  * that can be overridden for custom formatting or testing.
  *
- * @example
+ * **Example** (Accessing the output formatter)
+ *
  * ```ts
- * import * as Effect from "effect/Effect"
+ * import { Effect } from "effect"
  * import { CliOutput } from "effect/unstable/cli"
  *
  * // Access the formatter service
@@ -205,10 +235,10 @@ export interface Formatter {
  * const result = Effect.runSync(program)
  * ```
  *
- * @since 4.0.0
  * @category services
+ * @since 4.0.0
  */
-export const Formatter: ServiceMap.Reference<Formatter> = ServiceMap.Reference(
+export const Formatter: Context.Reference<Formatter> = Context.Reference(
   "effect/cli/CliOutput",
   { defaultValue: () => defaultFormatter() }
 )
@@ -216,10 +246,10 @@ export const Formatter: ServiceMap.Reference<Formatter> = ServiceMap.Reference(
 /**
  * Creates a Layer that provides a custom Formatter implementation.
  *
- * @example
+ * **Example** (Providing a custom formatter)
+ *
  * ```ts
- * import * as Console from "effect/Console"
- * import * as Effect from "effect/Effect"
+ * import { Console, Effect } from "effect"
  * import { CliOutput } from "effect/unstable/cli"
  *
  * // Create a custom formatter without colors
@@ -247,15 +277,16 @@ export const Formatter: ServiceMap.Reference<Formatter> = ServiceMap.Reference(
  * const JsonLayer = CliOutput.layer(jsonFormatter)
  * ```
  *
- * @since 4.0.0
  * @category layers
+ * @since 4.0.0
  */
 export const layer = (formatter: Formatter): Layer.Layer<never> => Layer.succeed(Formatter)(formatter)
 
 /**
  * Creates a default formatter with configurable options.
  *
- * @example
+ * **Example** (Creating default formatters)
+ *
  * ```ts
  * import { Effect } from "effect"
  * import { CliError, CliOutput } from "effect/unstable/cli"
@@ -288,8 +319,8 @@ export const layer = (formatter: Formatter): Layer.Layer<never> => Layer.succeed
  * })
  * ```
  *
- * @since 4.0.0
  * @category constructors
+ * @since 4.0.0
  */
 export const defaultFormatter = (options?: { colors?: boolean }): Formatter => {
   const globalProcess = (globalThis as any).process
@@ -404,8 +435,9 @@ interface Row {
  * Renders a table with aligned columns.
  * @internal
  */
-const renderTable = (rows: ReadonlyArray<Row>, widthCap: number) => {
-  const col = Math.min(Math.max(...rows.map((r) => visualLength(r.left))) + 4, widthCap)
+const renderTable = (rows: ReadonlyArray<Row>, widthCap?: number) => {
+  const maxColumn = Math.max(...rows.map((r) => visualLength(r.left))) + 4
+  const col = widthCap === undefined ? maxColumn : Math.min(maxColumn, widthCap)
   return rows.map(({ left, right }) => `  ${pad(left, col)}${right}`).join("\n")
 }
 
@@ -459,7 +491,7 @@ const formatHelpDocImpl = (doc: HelpDoc, colors: ColorFunctions): string => {
       const nameType = `${coloredName} ${coloredType}`
 
       const optionalSuffix = arg.required ? "" : colors.dim(" (optional)")
-      const description = (arg.description ?? "") + optionalSuffix
+      const description = Option.getOrElse(arg.description, () => "") + optionalSuffix
 
       return {
         left: nameType,
@@ -491,11 +523,11 @@ const formatHelpDocImpl = (doc: HelpDoc, colors: ColorFunctions): string => {
 
       return {
         left: namesPart + typePart,
-        right: flag.description ?? ""
+        right: Option.getOrElse(flag.description, () => "")
       }
     })
 
-    sections.push(renderTable(flagRows, 30))
+    sections.push(renderTable(flagRows))
     sections.push("")
   }
 
@@ -519,11 +551,11 @@ const formatHelpDocImpl = (doc: HelpDoc, colors: ColorFunctions): string => {
 
       return {
         left: namesPart + typePart,
-        right: flag.description ?? ""
+        right: Option.getOrElse(flag.description, () => "")
       }
     })
 
-    sections.push(renderTable(globalFlagRows, 30))
+    sections.push(renderTable(globalFlagRows))
     sections.push("")
   }
 

@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, FileSystem, Latch, Layer } from "effect"
+import { Effect, Fiber, FileSystem, Latch, Layer, Option } from "effect"
 import { TestClock } from "effect/testing"
 import { Message, MessageStorage, ShardingConfig, Snowflake, SqlMessageStorage } from "effect/unstable/cluster"
 import { SqlClient } from "effect/unstable/sql"
@@ -67,7 +67,7 @@ describe("SqlMessageStorage", () => {
           const storage = yield* MessageStorage.MessageStorage
           const request = yield* makeRequest({
             rpc: StreamRpc,
-            payload: StreamRpc.payloadSchema.makeUnsafe({ id: 123 })
+            payload: StreamRpc.payloadSchema.make({ id: 123 })
           })
           let result = yield* storage.saveRequest(request)
           expect(result._tag).toEqual("Success")
@@ -83,11 +83,11 @@ describe("SqlMessageStorage", () => {
           result = yield* storage.saveRequest(
             yield* makeRequest({
               rpc: StreamRpc,
-              payload: StreamRpc.payloadSchema.makeUnsafe({ id: 123 })
+              payload: StreamRpc.payloadSchema.make({ id: 123 })
             })
           )
-          assert(result._tag === "Duplicate" && result.lastReceivedReply !== undefined)
-          expect(result.lastReceivedReply._tag).toEqual("Chunk")
+          assert(result._tag === "Duplicate" && Option.isSome(result.lastReceivedReply))
+          expect(result.lastReceivedReply.value._tag).toEqual("Chunk")
 
           // get the un-acked chunk
           const replies = yield* storage.repliesFor([request])
@@ -98,11 +98,11 @@ describe("SqlMessageStorage", () => {
           result = yield* storage.saveRequest(
             yield* makeRequest({
               rpc: StreamRpc,
-              payload: StreamRpc.payloadSchema.makeUnsafe({ id: 123 })
+              payload: StreamRpc.payloadSchema.make({ id: 123 })
             })
           )
-          assert(result._tag === "Duplicate" && result.lastReceivedReply !== undefined)
-          expect(result.lastReceivedReply._tag).toEqual("WithExit")
+          assert(result._tag === "Duplicate" && Option.isSome(result.lastReceivedReply))
+          expect(result.lastReceivedReply.value._tag).toEqual("WithExit")
 
           // duplicate WithExit
           const fiber = yield* storage.saveReply(yield* makeReply(request)).pipe(Effect.forkChild)
@@ -123,13 +123,13 @@ describe("SqlMessageStorage", () => {
           yield* storage.saveRequest(
             yield* makeRequest({
               rpc: PrimaryKeyTest,
-              payload: PrimaryKeyTest.payloadSchema.makeUnsafe({ id: 123 })
+              payload: PrimaryKeyTest.payloadSchema.make({ id: 123 })
             })
           )
           const result = yield* storage.saveRequest(
             yield* makeRequest({
               rpc: PrimaryKeyTest,
-              payload: PrimaryKeyTest.payloadSchema.makeUnsafe({ id: 123 })
+              payload: PrimaryKeyTest.payloadSchema.make({ id: 123 })
             })
           )
           expect(result._tag).toEqual("Duplicate")

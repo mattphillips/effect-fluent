@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { type JsonSchema, Schema } from "effect"
 import { TestSchema } from "effect/testing"
 import { toCodecOpenAI } from "effect/unstable/ai/OpenAiStructuredOutput"
+import * as Tool from "effect/unstable/ai/Tool"
 
 function assertJsonSchema(schema: Schema.Top, expected: JsonSchema.JsonSchema) {
   assert.deepStrictEqual(toCodecOpenAI(schema).jsonSchema, expected)
@@ -466,7 +467,7 @@ describe("toCodecOpenAI", () => {
       await decoding.succeed({ "0": "a", "1": 1 }, ["a", 1])
     })
 
-    it("Tuple([String, Finite]) + description", async () => {
+    it("Tuple([String, Finite]) + description", () => {
       const schema = Schema.Tuple([Schema.String, Schema.Finite]).annotate({ description: "description" })
       assertJsonSchema(schema, {
         "type": "object",
@@ -591,7 +592,45 @@ describe("toCodecOpenAI", () => {
     })
   })
 
+  it("Class", () => {
+    class Person extends Schema.Class<Person>("Person")({
+      name: Schema.String
+    }) {}
+
+    assertJsonSchema(Person, {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" }
+      },
+      "required": ["name"],
+      "additionalProperties": false,
+      "$defs": {
+        "Person": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" }
+          },
+          "required": ["name"],
+          "additionalProperties": false
+        }
+      }
+    })
+  })
+
   describe("Record", () => {
+    it("EmptyParams", () => {
+      assertJsonSchema(Tool.EmptyParams, {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      })
+      assertJsonSchema(Schema.Record(Schema.String, Schema.Never), {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      })
+    })
+
     it("Record(String, Finite)", async () => {
       const schema = Schema.Record(Schema.String, Schema.Finite)
       assertJsonSchema(schema, {

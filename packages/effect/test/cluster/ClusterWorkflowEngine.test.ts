@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from "@effect/vitest"
-import { Cause, DateTime, Duration, Effect, Exit, Fiber, Layer, Schema, ServiceMap } from "effect"
+import { Cause, Context, DateTime, Duration, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import {
   ClusterWorkflowEngine,
@@ -14,7 +14,7 @@ import { Activity, DurableClock, DurableDeferred, Workflow } from "effect/unstab
 import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine"
 
 describe.concurrent("ClusterWorkflowEngine", () => {
-  it.effect("should run a workflow", () =>
+  it.effect("executes, resumes, deduplicates, and polls a suspended workflow", () =>
     Effect.gen(function*() {
       const sharding = yield* Sharding.Sharding
       const driver = yield* MessageStorage.MemoryDriver
@@ -80,10 +80,10 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       expect(driver.requests.size).toEqual(10)
 
       // test poll
-      expect(yield* EmailWorkflow.poll(executionId)).toEqual(new Workflow.Complete({ exit: Exit.void }))
+      expect(yield* EmailWorkflow.poll(executionId)).toEqual(Option.some(new Workflow.Complete({ exit: Exit.void })))
     }).pipe(Effect.provide(TestWorkflowLayer)))
 
-  it.effect("interrupt", () =>
+  it.effect("interrupts a suspended workflow and runs compensation", () =>
     Effect.gen(function*() {
       const sharding = yield* Sharding.Sharding
       const driver = yield* MessageStorage.MemoryDriver
@@ -134,7 +134,7 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       Effect.provide(TestWorkflowLayer)
     ))
 
-  it.effect("Workflow.withCompensation", () =>
+  it.effect("Workflow.withCompensation runs compensation when the workflow fails", () =>
     Effect.gen(function*() {
       yield* TestClock.adjust(1)
 
@@ -156,7 +156,7 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       Effect.provide(TestWorkflowLayer)
     ))
 
-  it.effect("Activity.raceAll", () =>
+  it.effect("Activity.raceAll returns the first activity and interrupts losers", () =>
     Effect.gen(function*() {
       const flags = yield* Flags
       yield* TestClock.adjust(1)
@@ -175,7 +175,7 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       expect(flags.get("interrupt3")).toBeFalsy()
     }).pipe(Effect.provide(TestWorkflowLayer)))
 
-  it.effect("Activity.raceAll durable", () =>
+  it.effect("Activity.raceAll resumes the first durable activity", () =>
     Effect.gen(function*() {
       const sharding = yield* Sharding.Sharding
       yield* TestClock.adjust(1)
@@ -211,7 +211,7 @@ describe.concurrent("ClusterWorkflowEngine", () => {
       assert(typeof token === "string")
 
       yield* DurableDeferred.done(ChildDeferred, {
-        token: DurableDeferred.Token.makeUnsafe(token),
+        token: DurableDeferred.Token.make(token),
         exit: Exit.void
       })
       yield* TestClock.adjust(5000)
@@ -284,7 +284,7 @@ const EmailWorkflow = Workflow.make({
   }
 })
 
-class Flags extends ServiceMap.Service<Flags>()("Flags", {
+class Flags extends Context.Service<Flags>()("Flags", {
   make: Effect.sync(() => new Map<string, boolean | string>())
 }) {
   static readonly layer = Layer.effect(Flags, this.make)
@@ -311,7 +311,7 @@ const EmailWorkflowLayer = EmailWorkflow.toLayer(Effect.fn(function*(payload) {
         })
       }
     })
-  }).asEffect().pipe(
+  }).pipe(
     EmailWorkflow.withCompensation(Effect.fnUntraced(function*() {
       flags.set("compensation", true)
     })),
@@ -544,7 +544,7 @@ const CatchWorkflowLayer = CatchWorkflow.toLayer(Effect.fnUntraced(function*() {
   yield* Activity.make({
     name: "fail",
     execute: Effect.die("boom")
-  }).asEffect().pipe(
+  }).pipe(
     Effect.catchCause((cause) =>
       Activity.make({
         name: "log",
@@ -552,7 +552,7 @@ const CatchWorkflowLayer = CatchWorkflow.toLayer(Effect.fnUntraced(function*() {
           flags.set("catch", true)
           return Effect.log(cause)
         })
-      }).asEffect()
+      })
     )
   )
 }))
