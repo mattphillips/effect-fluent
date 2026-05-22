@@ -1,4 +1,4 @@
-import { Effect as _Effect, Equal, Equivalence, Hash } from 'effect';
+import { Equal, Equivalence, Hash } from 'effect';
 import type { LazyArg } from 'effect/Function';
 import { dual, identity } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
@@ -63,14 +63,6 @@ abstract class ResultBase<out A, out E> extends Inspectable {
   }
 
   // --- Generator interop ---
-
-  // Explicit conversion to an Effect — `Effect.fromResult` lifts Failure into
-  // an Effect failure. Use this (or `Effect.fromResult`) to yield a Result
-  // inside `Effect.gen`; the Result itself is only yieldable inside
-  // `Result.gen`.
-  asEffect(): _Effect.Effect<A, E> {
-    return _Effect.fromResult(this.result);
-  }
 
   [Symbol.iterator](): ResultIterator<Result<A, E>> {
     return new Gen.SingleShotGen(this) as any;

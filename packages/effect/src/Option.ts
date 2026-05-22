@@ -1,4 +1,4 @@
-import { Effect as _Effect, Cause, Equal, Equivalence, Hash, Result } from 'effect';
+import { Equal, Equivalence, Hash, Result } from 'effect';
 import type { Filter } from 'effect/Filter';
 import { dual, type LazyArg } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
@@ -63,14 +63,6 @@ abstract class OptionBase<out A> extends Inspectable {
   }
 
   // --- Generator interop ---
-
-  // Explicit conversion to an Effect — `Effect.fromOption` lifts None to a
-  // `NoSuchElementError` failure. Use this (or `Effect.fromOption`) to yield
-  // an Option inside `Effect.gen`; the Option itself is only yieldable inside
-  // `Option.gen`.
-  asEffect(): _Effect.Effect<A, Cause.NoSuchElementError> {
-    return _Effect.fromOption(this.option);
-  }
 
   [Symbol.iterator](): OptionIterator<Option<A>> {
     return new Gen.SingleShotGen(this) as any;

@@ -1,7 +1,5 @@
 import { describe, it } from '@effect-fluent/vitest';
-import { assertExitFailure, assertFailure, assertSuccess, strictEqual } from '@effect-fluent/vitest/utils';
-import { Cause } from 'effect';
-import { Effect } from '../../src/Effect.js';
+import { assertFailure, assertSuccess } from '@effect-fluent/vitest/utils';
 import { Result } from '../../src/Result.js';
 
 describe('Result', () => {
@@ -35,21 +33,5 @@ describe('Result', () => {
       const r = new MyService().compute;
       assertSuccess(r, 11);
     });
-  });
-
-  describe('Effect.gen interop', () => {
-    it.effect('Result.succeed can be yielded in Effect.gen', () =>
-      Effect.gen(function* () {
-        const result = yield* Result.succeed(42);
-        strictEqual(result, 42);
-      })
-    );
-
-    it.effect('Result.fail fails in Effect.gen', () =>
-      Effect.gen(function* () {
-        const exit = yield* Effect.fromResult(Result.fail('err' as const)).exit;
-        assertExitFailure(exit, Cause.fail('err' as const));
-      })
-    );
   });
 });

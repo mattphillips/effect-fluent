@@ -104,7 +104,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> 
   }
 
   static fromResult<A, E>(result: Result<A, E>): Effect<A, E> {
-    return new Effect(result.asEffect());
+    return new Effect(_Effect.fromResult(result.asResult()));
   }
 
   static gen<Eff extends Gen.Yieldable<any, any, any>, AEff>(
@@ -121,13 +121,7 @@ export class Effect<A, E = never, R = never> implements _Effect.Effect<A, E, R> 
         const generator = self !== undefined ? f.call(self) : f();
         let result = generator.next();
         while (!result.done) {
-          // Lift fluent Option/Result into Effect explicitly — core's gen
-          // no longer auto-unwraps them. Fluent and core Effects pass through
-          // (fluent's [Symbol.iterator] delegates to the inner primitive).
-          const yieldable = result.value;
-          const effect =
-            Option.is(yieldable) || Result.is(yieldable) ? yieldable.asEffect() : yieldable;
-          const nextValue = yield* effect;
+          const nextValue = yield* result.value;
           result = generator.next(nextValue);
         }
         return result.value;
@@ -556,21 +550,17 @@ export namespace All {
 }
 
 export namespace Gen {
-  // What can be `yield*`-ed inside `Effect.gen`: a core/fluent Effect, a fluent
-  // Option (lifts None → NoSuchElementError), or a fluent Result (lifts Failure
-  // → the Result's error type). Runtime conversion happens in `Effect.gen`'s
-  // body via `.asEffect()`.
-  export type Yieldable<A, E, R> = _Effect.Effect<A, E, R> | Option<A> | Result<A, E>;
+  // Only Effects (core or fluent — fluent implements `_Effect.Effect`) are
+  // yieldable inside `Effect.gen`. To yield an Option or Result, lift them
+  // explicitly via `Effect.fromOption` / `Effect.fromResult`. This matches
+  // core's behaviour after the `Yieldable` removal.
+  export type Yieldable<A, E, R> = _Effect.Effect<A, E, R>;
 
   export type YieldError<Eff> = [Eff] extends [never]
     ? never
     : Eff extends _Effect.Effect<any, infer E, any>
       ? E
-      : Eff extends Option<any>
-        ? Cause.NoSuchElementError
-        : Eff extends Result<any, infer E>
-          ? E
-          : never;
+      : never;
 
   export type YieldServices<Eff> = [Eff] extends [never]
     ? never
