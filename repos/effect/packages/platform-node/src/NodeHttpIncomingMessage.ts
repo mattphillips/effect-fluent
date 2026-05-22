@@ -1,8 +1,22 @@
 /**
- * @since 1.0.0
+ * Utilities for adapting Node `http.IncomingMessage` values to the Effect HTTP
+ * incoming message interface used by the platform Node server and client
+ * implementations.
+ *
+ * This module is useful when code needs to keep access to Node's request or
+ * response object while also exposing Effect's typed headers, remote address,
+ * body decoders, and stream interface. The body helpers consume Node's readable
+ * stream, cache decoded text and array-buffer results, and honor the
+ * `HttpIncomingMessage.MaxBodySize` fiber ref. Prefer a single body access
+ * strategy per message: raw `stream` access is not cached, and Node request
+ * bodies cannot be replayed once the underlying stream has been consumed.
+ *
+ * @since 4.0.0
  */
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
+import * as Option from "effect/Option"
+import type * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import * as Headers from "effect/unstable/http/Headers"
 import * as IncomingMessage from "effect/unstable/http/HttpIncomingMessage"
@@ -11,24 +25,30 @@ import type * as Http from "node:http"
 import * as NodeStream from "./NodeStream.ts"
 
 /**
- * @since 1.0.0
- * @category Constructors
+ * Base adapter from Node `IncomingMessage` to Effect HTTP incoming messages,
+ * exposing headers, remote address, stream access, and cached text, JSON, URL
+ * parameter, and array-buffer body decoders with caller-provided error mapping.
+ *
+ * @category constructors
+ * @since 4.0.0
  */
 export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
   implements IncomingMessage.HttpIncomingMessage<E>
 {
   /**
-   * @since 1.0.0
+   * Marks this value as an HTTP incoming message for runtime guards.
+   *
+   * @since 4.0.0
    */
   readonly [IncomingMessage.TypeId]: typeof IncomingMessage.TypeId
   readonly source: Http.IncomingMessage
   readonly onError: (error: unknown) => E
-  readonly remoteAddressOverride?: string | undefined
+  readonly remoteAddressOverride?: Option.Option<string> | undefined
 
   constructor(
     source: Http.IncomingMessage,
     onError: (error: unknown) => E,
-    remoteAddressOverride?: string
+    remoteAddressOverride?: Option.Option<string>
   ) {
     super()
     this[IncomingMessage.TypeId] = IncomingMessage.TypeId
@@ -42,7 +62,7 @@ export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
   }
 
   get remoteAddress() {
-    return this.remoteAddressOverride ?? this.source.socket.remoteAddress
+    return this.remoteAddressOverride ?? Option.fromNullishOr(this.source.socket.remoteAddress)
   }
 
   private textEffect: Effect.Effect<string, E> | undefined
@@ -52,7 +72,7 @@ export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
     }
     this.textEffect = Effect.runSync(Effect.cached(
       Effect.flatMap(
-        IncomingMessage.MaxBodySize.asEffect(),
+        IncomingMessage.MaxBodySize,
         (maxBodySize) =>
           NodeStream.toString(() => this.source, {
             onError: this.onError,
@@ -60,6 +80,7 @@ export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
           })
       )
     ))
+    this.arrayBufferEffect = Effect.map(this.textEffect, (_) => new TextEncoder().encode(_).buffer)
     return this.textEffect
   }
 
@@ -67,15 +88,15 @@ export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
     return Effect.runSync(this.text)
   }
 
-  get json(): Effect.Effect<unknown, E> {
+  get json(): Effect.Effect<Schema.Json, E> {
     return Effect.flatMap(this.text, (text) =>
       Effect.try({
-        try: () => text === "" ? null : JSON.parse(text) as unknown,
+        try: () => text === "" ? null : JSON.parse(text),
         catch: this.onError
       }))
   }
 
-  get jsonUnsafe(): unknown {
+  get jsonUnsafe(): Schema.Json {
     return Effect.runSync(this.json)
   }
 
@@ -94,12 +115,21 @@ export abstract class NodeHttpIncomingMessage<E> extends Inspectable.Class
     })
   }
 
+  private arrayBufferEffect: Effect.Effect<ArrayBuffer, E> | undefined
   get arrayBuffer(): Effect.Effect<ArrayBuffer, E> {
-    return Effect.withFiber((fiber) =>
+    if (this.arrayBufferEffect) {
+      return this.arrayBufferEffect
+    }
+    this.arrayBufferEffect = Effect.withFiber((fiber) =>
       NodeStream.toArrayBuffer(() => this.source, {
         onError: this.onError,
         maxBytes: fiber.getRef(IncomingMessage.MaxBodySize)
       })
+    ).pipe(
+      Effect.cached,
+      Effect.runSync
     )
+    this.textEffect = Effect.map(this.arrayBufferEffect, (_) => new TextDecoder().decode(_))
+    return this.arrayBufferEffect
   }
 }

@@ -8,7 +8,14 @@ import * as Schedule from "effect/Schedule"
 import * as TestClock from "effect/testing/TestClock"
 
 describe("Resource", () => {
-  it.effect("manual", () =>
+  it.effect("isResource", () =>
+    Effect.gen(function*() {
+      const resource = yield* Resource.manual(Effect.succeed(0))
+      assert.isTrue(Resource.isResource(resource))
+      assert.isFalse(Resource.isResource(new Set([0])))
+    }))
+
+  it.effect("manual refresh updates the cached value", () =>
     Effect.gen(function*() {
       const ref = yield* Ref.make(0)
       const resource = yield* Resource.manual(Ref.get(ref))
@@ -22,7 +29,7 @@ describe("Resource", () => {
       assert.strictEqual(result2, 1)
     }))
 
-  it.effect("auto", () =>
+  it.effect("manual refresh releases the previous scoped acquisition", () =>
     Effect.gen(function*() {
       const ref = yield* Ref.make(0)
       const resource = yield* Resource.auto(Ref.get(ref), Schedule.spaced(Duration.millis(4)))

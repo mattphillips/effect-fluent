@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
-import { deepStrictEqual, strictEqual } from "@effect/vitest/utils"
-import { Effect, Stream } from "effect"
+import { assertNone, assertSome, deepStrictEqual, strictEqual } from "@effect/vitest/utils"
+import { Effect, Schema, Stream } from "effect"
+import * as Option from "effect/Option"
 import { HttpClientRequest, HttpServerRequest } from "effect/unstable/http"
 
 describe("HttpServerRequest", () => {
@@ -22,7 +23,7 @@ describe("HttpServerRequest", () => {
     strictEqual(HttpClientRequest.isHttpClientRequest(clientRequest), true)
     strictEqual(clientRequest.method, "POST")
     strictEqual(clientRequest.url, "http://localhost:3000/todos/1")
-    strictEqual(clientRequest.hash, "top")
+    assertSome(clientRequest.hash, "top")
     strictEqual(clientRequest.headers["content-type"], "application/json")
     strictEqual(clientRequest.headers["content-length"], "13")
     strictEqual(clientRequest.headers["x-test"], "ok")
@@ -58,7 +59,7 @@ describe("HttpServerRequest", () => {
     strictEqual(clientRequest.headers["x-test"], "ok")
   })
 
-  it.effect("fromClientRequest preserves request metadata and body accessors", () =>
+  it.effect("fromClientRequest preserves request metadata and shares concurrent stream body accessors", () =>
     Effect.gen(function*() {
       const clientRequest = HttpClientRequest.post(new URL("http://localhost:3000/items?existing=1#top")).pipe(
         HttpClientRequest.appendUrlParam("page", "1"),
@@ -107,4 +108,50 @@ describe("HttpServerRequest", () => {
         assert.strictEqual(new TextDecoder().decode(yield* parts[1].contentEffect), "hello")
       }
     }))
+
+  it.effect("schemaBodyJson applies parse options", () =>
+    Effect.gen(function*() {
+      const request = HttpServerRequest.fromWeb(
+        new Request("http://localhost:3000", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            status: "ok",
+            name: "svc",
+            sha: "abc",
+            version: "1.0.0"
+          })
+        })
+      )
+      const schema = Schema.Struct({
+        status: Schema.String,
+        name: Schema.String
+      })
+
+      const decoded = yield* HttpServerRequest.schemaBodyJson(schema, { onExcessProperty: "preserve" }).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request)
+      )
+      const decodedRecord = decoded as Record<string, unknown>
+
+      assert.strictEqual(decoded.status, "ok")
+      assert.strictEqual(decoded.name, "svc")
+      assert.strictEqual(decodedRecord.sha, "abc")
+      assert.strictEqual(decodedRecord.version, "1.0.0")
+    }))
+
+  it("remoteAddress defaults to none for web requests", () => {
+    const request = HttpServerRequest.fromWeb(new Request("http://example.com"))
+    assertNone(request.remoteAddress)
+  })
+
+  it("modify distinguishes missing and explicit none remoteAddress", () => {
+    const request = HttpServerRequest.fromWeb(new Request("http://example.com"))
+    const withRemoteAddress = request.modify({ remoteAddress: Option.some("127.0.0.1") })
+
+    assertSome(withRemoteAddress.remoteAddress, "127.0.0.1")
+    assertSome(withRemoteAddress.modify({}).remoteAddress, "127.0.0.1")
+    assertNone(withRemoteAddress.modify({ remoteAddress: Option.none() }).remoteAddress)
+  })
 })

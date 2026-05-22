@@ -1,65 +1,100 @@
 /**
+ * Internal utilities for the Effect ecosystem's generator-based syntax and
+ * higher-kinded type machinery.
+ *
+ * ## Mental model
+ *
+ * - **SingleShotGen** — an `IterableIterator` wrapper that yields its value
+ *   exactly once. Used internally by `[Symbol.iterator]()` on Effect, Option,
+ *   Result, and other yieldable types so they work inside generator functions.
+ * - **Gen** — a type-level signature for generator-based monadic composition
+ *   (`gen` functions). Parametric over any `TypeLambda` so each module
+ *   (Effect, Option, Result, ...) can expose its own `gen` with correct types.
+ * - **Variance** — a type-level marker that encodes the variance (covariant,
+ *   contravariant, invariant) of a `TypeLambda`'s type parameters.
+ *   Used by {@link Gen} for type inference.
+ *
+ * ## Common tasks
+ *
+ * - Make a type yieldable in generators -> implement `[Symbol.iterator]()` returning a {@link SingleShotGen}
+ * - Define a generator-based API for a new TypeLambda -> type it as {@link Gen}`<MyTypeLambda>`
+ * - Encode variance for a higher-kinded type -> use {@link Variance}
+ *
+ * ## Gotchas
+ *
+ * - {@link SingleShotGen} yields its value only on the first `.next()` call.
+ *   Calling `.next()` again returns `{ done: true }`. Iterating the same
+ *   instance twice will skip the value on the second pass; call
+ *   `[Symbol.iterator]()` to get a fresh iterator.
+ * - {@link Gen} and {@link Variance} are pure type-level constructs — they
+ *   have no runtime representation.
+ *
+ * ## Quickstart
+ *
+ * **Example** (Using SingleShotGen to make a type yieldable)
+ *
+ * ```ts
+ * import { Utils } from "effect"
+ *
+ * class MyWrapper<A> {
+ *   constructor(readonly value: A) {}
+ *   [Symbol.iterator]() {
+ *     return new Utils.SingleShotGen<MyWrapper<A>, A>(this)
+ *   }
+ * }
+ *
+ * const w = new MyWrapper(42)
+ * const iter = w[Symbol.iterator]()
+ * console.log(iter.next(undefined as any))
+ * // { value: MyWrapper { value: 42 }, done: false }
+ * console.log(iter.next(42))
+ * // { value: 42, done: true }
+ * ```
+ *
+ * @see {@link SingleShotGen}
+ * @see {@link Gen}
+ * @see {@link Variance}
+ *
  * @since 2.0.0
  */
-import { identity } from "./Function.ts"
 import type { Kind, TypeLambda } from "./HKT.ts"
-import { isObject } from "./Predicate.ts"
 import type * as Types from "./Types.ts"
 
 /**
- * @since 2.0.0
- */
-const GenKindTypeId = "~effect/Utils/GenKind"
-
-/**
- * @category models
- * @since 2.0.0
- */
-export interface GenKind<F extends TypeLambda, R, O, E, A> extends Variance<F, R, O, E> {
-  readonly value: Kind<F, R, O, E, A>
-
-  [Symbol.iterator](): IterableIterator<GenKind<F, R, O, E, A>, A>
-}
-
-/**
- * @category predicates
- * @since 3.0.6
- */
-export const isGenKind = (u: unknown): u is GenKind<any, any, any, any, any> => isObject(u) && GenKindTypeId in u
-
-class GenKindImpl<F extends TypeLambda, R, O, E, A> implements GenKind<F, R, O, E, A> {
-  readonly value: Kind<F, R, O, E, A>
-
-  constructor(
-    value: Kind<F, R, O, E, A>
-  ) {
-    this.value = value
-  }
-
-  get _F() {
-    return identity
-  }
-
-  get _R() {
-    return (_: R) => _
-  }
-
-  get _O() {
-    return (_: never): O => _
-  }
-
-  get _E() {
-    return (_: never): E => _
-  }
-
-  readonly [GenKindTypeId]: typeof GenKindTypeId = GenKindTypeId;
-
-  [Symbol.iterator](): IterableIterator<GenKind<F, R, O, E, A>, A> {
-    return new SingleShotGen<GenKind<F, R, O, E, A>, A>(this as any)
-  }
-}
-
-/**
+ * An `IterableIterator` that yields its wrapped value exactly once.
+ *
+ * **When to use**
+ *
+ * Implement `[Symbol.iterator]()` on Effect-like types so they can be
+ * `yield*`-ed inside generator functions, such as `Effect.gen` and
+ * `Option.gen`. You almost never construct this directly — it is created
+ * internally by yieldable types.
+ *
+ * **Details**
+ *
+ * The first call to `next()` returns `{ value: self, done: false }`. Every
+ * subsequent call returns `{ value: a, done: true }` where `a` is the argument
+ * passed to `next()`. `[Symbol.iterator]()` returns a **new** `SingleShotGen`
+ * wrapping the same value, so the outer type can be iterated multiple times.
+ * It does not mutate the wrapped value.
+ *
+ * **Example** (Yielding a wrapped value in a generator)
+ *
+ * ```ts
+ * import { Utils } from "effect"
+ *
+ * const gen = new Utils.SingleShotGen<string, number>("hello")
+ *
+ * // First call yields the wrapped value
+ * console.log(gen.next(0))
+ * // { value: "hello", done: false }
+ *
+ * // Second call signals completion with the provided value
+ * console.log(gen.next(42))
+ * // { value: 42, done: true }
+ * ```
+ *
+ * @see {@link Gen} — the type-level signature that relies on `SingleShotGen`
  * @category constructors
  * @since 2.0.0
  */
@@ -72,6 +107,8 @@ export class SingleShotGen<T, A> implements IterableIterator<T, A> {
   }
 
   /**
+   * Yields the stored value once, then completes with the value sent back in.
+   *
    * @since 2.0.0
    */
   next(a: A): IteratorResult<T, A> {
@@ -88,6 +125,8 @@ export class SingleShotGen<T, A> implements IterableIterator<T, A> {
   }
 
   /**
+   * Creates a fresh single-shot iterator over the stored value.
+   *
    * @since 2.0.0
    */
   [Symbol.iterator](): IterableIterator<T, A> {
@@ -96,20 +135,27 @@ export class SingleShotGen<T, A> implements IterableIterator<T, A> {
 }
 
 /**
- * @category constructors
- * @since 2.0.0
- */
-export const makeGenKind = <F extends TypeLambda, R, O, E, A>(
-  kind: Kind<F, R, O, E, A>
-): GenKind<F, R, O, E, A> => new GenKindImpl(kind)
-
-/**
- * @example
- * ```ts
- * import type { Utils } from "effect"
- * import type * as Option from "effect/Option"
+ * Type-level marker encoding the variance of a `TypeLambda`'s type
+ * parameters.
  *
- * // Variance defines the type parameter relationships
+ * **When to use**
+ *
+ * Define variance constraints for a higher-kinded type so that {@link Gen}
+ * can correctly infer `R`, `O`, and `E` from yielded values. You typically
+ * don't construct values of this type — it exists purely for type inference.
+ *
+ * **Details**
+ *
+ * `F` is invariant and must match exactly. `R` is contravariant in the input
+ * or environment position. `O` and `E` are covariant in the output and error
+ * positions. This is a pure type-level construct with no runtime
+ * representation.
+ *
+ * **Example** (Declaring variance for a TypeLambda)
+ *
+ * ```ts
+ * import type { Option, Utils } from "effect"
+ *
  * declare const variance: Utils.Variance<
  *   Option.OptionTypeLambda,
  *   never,
@@ -118,11 +164,11 @@ export const makeGenKind = <F extends TypeLambda, R, O, E, A>(
  * >
  * ```
  *
+ * @see {@link Gen} — uses `Variance` for type parameter inference
  * @category models
  * @since 2.0.0
  */
 export interface Variance<in out F extends TypeLambda, in R, out O, out E> {
-  readonly [GenKindTypeId]: typeof GenKindTypeId
   readonly _F: Types.Invariant<F>
   readonly _R: Types.Contravariant<R>
   readonly _O: Types.Covariant<O>
@@ -130,14 +176,32 @@ export interface Variance<in out F extends TypeLambda, in R, out O, out E> {
 }
 
 /**
- * @example
+ * Type-level signature for generator-based monadic composition over any
+ * `TypeLambda`.
+ *
+ * **When to use**
+ *
+ * Type the `gen` function of a module that supports generator syntax, such as
+ * `Option.gen`, `Result.gen`, and `Effect.gen`. It accepts either `(body)` or
+ * `(self, body)` where `body` is a generator function. The `self` overload
+ * binds `this` inside the generator.
+ *
+ * **Details**
+ *
+ * This is a pure type alias with no runtime behavior. It infers `R`, `O`, and
+ * `E` from the yielded values via {@link Variance} or `Kind` constraints. The
+ * generator's return type `A` becomes the output's `A` parameter.
+ *
+ * **Example** (Typing a gen function for Option)
+ *
  * ```ts
  * import type { Option, Utils } from "effect"
  *
- * // Gen enables generator-based syntax for any TypeLambda
  * declare const gen: Utils.Gen<Option.OptionTypeLambda>
  * ```
  *
+ * @see {@link Variance} — encodes the variance used for inference
+ * @see {@link SingleShotGen} — the iterator protocol that makes yielding work
  * @category models
  * @since 2.0.0
  */
@@ -168,22 +232,7 @@ export type Gen<F extends TypeLambda> = <
   A
 >
 
-/**
- * @example
- * ```ts
- * import type { Utils } from "effect"
- *
- * const value1: Utils.OptionalNumber = 42
- * const value2: Utils.OptionalNumber = null
- * const value3: Utils.OptionalNumber = undefined
- * ```
- *
- * @category models
- * @since 2.0.0
- */
-export type OptionalNumber = number | null | undefined
-
-const InternalTypeId = "~effect/Effect/internal"
+const InternalTypeId = "~effect/Utils/internal"
 
 const standard = {
   [InternalTypeId]: <A>(body: () => A) => {
@@ -203,31 +252,5 @@ const forced = {
 
 const isNotOptimizedAway = standard[InternalTypeId](() => new Error().stack)?.includes(InternalTypeId) === true
 
-/**
- * @since 3.2.2
- * @status experimental
- * @category tracing
- */
+/** @internal */
 export const internalCall = isNotOptimizedAway ? standard[InternalTypeId] : forced[InternalTypeId]
-
-const genConstructor = (function*() {}).constructor
-
-/**
- * @example
- * ```ts
- * import { Utils } from "effect"
- *
- * function* generatorFn() {
- *   yield 1
- *   yield 2
- * }
- *
- * console.log(Utils.isGeneratorFunction(generatorFn)) // true
- * console.log(Utils.isGeneratorFunction(() => {})) // false
- * ```
- *
- * @category predicates
- * @since 3.11.0
- */
-export const isGeneratorFunction = (u: unknown): u is (...args: Array<any>) => Generator<any, any, any> =>
-  isObject(u) && u.constructor === genConstructor

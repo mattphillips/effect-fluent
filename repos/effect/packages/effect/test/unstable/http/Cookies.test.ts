@@ -1,12 +1,13 @@
-import { describe, it } from "@effect/vitest"
-import { deepStrictEqual } from "@effect/vitest/utils"
+import { assert, describe, it } from "@effect/vitest"
+import { assertNone, assertSome, deepStrictEqual } from "@effect/vitest/utils"
 import { Schema } from "effect"
+import * as Option from "effect/Option"
 import { TestSchema } from "effect/testing"
 import { Cookies } from "effect/unstable/http"
 import { assertSuccess } from "../../utils/assert.ts"
 
 describe("Cookies", () => {
-  it("expireCookie", () => {
+  it("expireCookie returns a Result with an expired Set-Cookie value", () => {
     assertSuccess(
       Cookies.expireCookie(Cookies.empty, "session", { path: "/", secure: true }),
       Cookies.fromReadonlyRecord({
@@ -20,7 +21,7 @@ describe("Cookies", () => {
     )
   })
 
-  it("expireCookieUnsafe", () => {
+  it("expireCookieUnsafe adds an expired Set-Cookie value", () => {
     deepStrictEqual(
       Cookies.expireCookieUnsafe(Cookies.empty, "session", { path: "/", secure: true }),
       Cookies.fromReadonlyRecord({
@@ -67,5 +68,13 @@ describe("Cookies", () => {
         ]
       )
     })
+  })
+
+  it("get and getValue return Option", () => {
+    const cookies = Cookies.fromSetCookie("session=abc; Path=/")
+    assert.isTrue(Option.isSome(Cookies.get(cookies, "session")))
+    assertSome(Cookies.getValue(cookies, "session"), "abc")
+    assertNone(Cookies.get(cookies, "missing"))
+    assertNone(Cookies.getValue(cookies, "missing"))
   })
 })

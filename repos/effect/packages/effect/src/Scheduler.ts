@@ -1,33 +1,77 @@
 /**
+ * The `Scheduler` module defines the runtime scheduling services used by
+ * Effect fibers. A scheduler decides how runnable tasks are enqueued, when they
+ * are dispatched, and whether a fiber should yield after consuming its
+ * operation budget.
+ *
+ * **Common tasks**
+ *
+ * - Use {@link Scheduler} to provide a custom runtime scheduler
+ * - Use {@link MixedScheduler} for the default priority-aware scheduler
+ * - Use {@link MaxOpsBeforeYield} to tune fairness for CPU-bound fibers
+ * - Use {@link PreventSchedulerYield} only when a runtime should bypass yield checks
+ *
+ * **Gotchas**
+ *
+ * - Scheduler priorities affect the order of queued runtime tasks, not the
+ *   semantic result of an `Effect`
+ * - Disabling scheduler yields can improve throughput for controlled workloads,
+ *   but it can also let long-running fibers monopolize the JavaScript thread
+ *
  * @since 2.0.0
  */
+import * as Context from "./Context.ts"
 import type * as Fiber from "./Fiber.ts"
-import * as ServiceMap from "./ServiceMap.ts"
 
 /**
- * A scheduler manages the execution of Effects by controlling when and how tasks
- * are scheduled and executed. It determines the execution mode (synchronous or
- * asynchronous) and handles task prioritization and yielding behavior.
+ * A scheduler manages the execution of Effect fibers by controlling when queued
+ * tasks run.
  *
- * The scheduler is responsible for:
- * - Scheduling tasks with different priorities
- * - Determining when fibers should yield control
- * - Managing the execution flow of Effects
+ * **Details**
  *
- * @since 2.0.0
+ * A scheduler determines the execution mode, schedules tasks with different
+ * priorities, and decides when fibers should yield control after consuming
+ * their operation budget.
+ *
  * @category models
+ * @since 2.0.0
  */
 export interface Scheduler {
   readonly executionMode: "sync" | "async"
-  readonly scheduleTask: (task: () => void, priority: number) => void
-  readonly shouldYield: (fiber: Fiber.Fiber<unknown, unknown>) => boolean
+  shouldYield(fiber: Fiber.Fiber<unknown, unknown>): boolean
+  makeDispatcher(): SchedulerDispatcher
 }
 
 /**
+ * A dispatcher created by a `Scheduler` for enqueuing tasks and forcing queued
+ * tasks to run.
+ *
+ * **Details**
+ *
+ * `scheduleTask` queues a task with a priority. `flush` drains pending work
+ * synchronously, which is useful when callers need deterministic completion of
+ * already scheduled tasks.
+ *
+ * @category models
  * @since 4.0.0
- * @category references
  */
-export const Scheduler: ServiceMap.Reference<Scheduler> = ServiceMap.Reference<Scheduler>("effect/Scheduler", {
+export interface SchedulerDispatcher {
+  scheduleTask(task: () => void, priority: number): void
+  flush(): void
+}
+
+/**
+ * Context reference for the scheduler used by the Effect runtime.
+ *
+ * **Details**
+ *
+ * The default value creates a `MixedScheduler`. Provide this service to
+ * customize execution mode, task dispatching, or yield behavior.
+ *
+ * @category references
+ * @since 2.0.0
+ */
+export const Scheduler: Context.Reference<Scheduler> = Context.Reference<Scheduler>("effect/Scheduler", {
   defaultValue: () => new MixedScheduler()
 })
 
@@ -72,50 +116,19 @@ class PriorityBuckets {
 }
 
 /**
- * A scheduler implementation that provides efficient task scheduling
- * with support for both synchronous and asynchronous execution modes.
+ * A scheduler implementation that batches queued tasks and dispatches them by
+ * priority.
  *
- * Features:
- * - Batches tasks for efficient execution
- * - Supports priority-based task scheduling
- * - Configurable execution mode (sync/async)
- * - Automatic yielding based on operation count
- * - Optimized for high-throughput scenarios
+ * **Details**
  *
- * @example
- * ```ts
- * import { MixedScheduler } from "effect/Scheduler"
+ * `MixedScheduler` supports synchronous and asynchronous execution modes, uses
+ * operation counts to decide when fibers should yield, and is the default
+ * scheduler implementation.
  *
- * // Create a mixed scheduler with async execution (default)
- * const asyncScheduler = new MixedScheduler("async")
- *
- * // Create a mixed scheduler with sync execution
- * const syncScheduler = new MixedScheduler("sync")
- *
- * // Schedule tasks with different priorities
- * asyncScheduler.scheduleTask(() => console.log("High priority task"), 10)
- * asyncScheduler.scheduleTask(() => console.log("Normal priority task"), 0)
- * asyncScheduler.scheduleTask(() => console.log("Low priority task"), -1)
- *
- * // For sync scheduler, you can flush tasks immediately
- * syncScheduler.scheduleTask(() => console.log("Task 1"), 0)
- * syncScheduler.scheduleTask(() => console.log("Task 2"), 0)
- *
- * // Force flush all pending tasks in sync mode
- * syncScheduler.flush()
- * // Output: "Task 1", "Task 2"
- *
- * // Check execution mode
- * console.log(asyncScheduler.executionMode) // "async"
- * console.log(syncScheduler.executionMode) // "sync"
- * ```
- *
- * @since 2.0.0
  * @category schedulers
+ * @since 2.0.0
  */
 export class MixedScheduler implements Scheduler {
-  private tasks = new PriorityBuckets()
-  private running: (() => void) | undefined = undefined
   readonly executionMode: "sync" | "async"
   readonly setImmediate: (f: () => void) => () => void
 
@@ -124,6 +137,36 @@ export class MixedScheduler implements Scheduler {
     setImmediateFn: (f: () => void) => () => void = setImmediate
   ) {
     this.executionMode = executionMode
+    this.setImmediate = setImmediateFn
+  }
+
+  /**
+   * Returns whether the fiber has reached its operation budget and should yield.
+   *
+   * @since 2.0.0
+   */
+  shouldYield(fiber: Fiber.Fiber<unknown, unknown>) {
+    return fiber.currentOpCount >= fiber.maxOpsBeforeYield
+  }
+
+  /**
+   * Creates a dispatcher that schedules work through this scheduler.
+   *
+   * @since 4.0.0
+   */
+  makeDispatcher() {
+    return new MixedSchedulerDispatcher(this.setImmediate)
+  }
+}
+
+class MixedSchedulerDispatcher implements SchedulerDispatcher {
+  private tasks = new PriorityBuckets()
+  private running: (() => void) | undefined = undefined
+  readonly setImmediate: (f: () => void) => () => void
+
+  constructor(
+    setImmediateFn: (f: () => void) => () => void = setImmediate
+  ) {
     this.setImmediate = setImmediateFn
   }
 
@@ -161,13 +204,6 @@ export class MixedScheduler implements Scheduler {
   /**
    * @since 2.0.0
    */
-  shouldYield(fiber: Fiber.Fiber<unknown, unknown>) {
-    return fiber.currentOpCount >= fiber.maxOpsBeforeYield
-  }
-
-  /**
-   * @since 2.0.0
-   */
   flush() {
     while (this.tasks.buckets.length > 0) {
       if (this.running !== undefined) {
@@ -181,103 +217,18 @@ export class MixedScheduler implements Scheduler {
 
 /**
  * A service reference that controls the maximum number of operations a fiber
- * can perform before yielding control back to the scheduler. This helps
- * prevent long-running fibers from monopolizing the execution thread.
+ * can perform before yielding control back to the scheduler.
  *
- * The default value is 2048 operations, which provides a good balance between
- * performance and fairness in concurrent execution.
+ * **Details**
  *
- * @example
- * ```ts
- * import { Effect } from "effect"
- * import { MaxOpsBeforeYield } from "effect/Scheduler"
+ * The default value is `2048` operations, which balances performance and
+ * fairness by helping prevent long-running fibers from monopolizing the
+ * execution thread.
  *
- * // Configure a fiber to yield more frequently
- * const program = Effect.gen(function*() {
- *   // Get current max ops setting (default is 2048)
- *   const currentMax = yield* MaxOpsBeforeYield
- *   yield* Effect.log(`Default max ops before yield: ${currentMax}`)
- *
- *   // Run with reduced max ops for more frequent yielding
- *   return yield* Effect.provideService(
- *     Effect.gen(function*() {
- *       const maxOps = yield* MaxOpsBeforeYield
- *       yield* Effect.log(`Max ops before yield: ${maxOps}`)
- *
- *       // Run a compute-intensive task that will yield frequently
- *       let result = 0
- *       for (let i = 0; i < 10000; i++) {
- *         result += i
- *         // This will cause yielding every 100 operations
- *         yield* Effect.sync(() => result)
- *       }
- *       return result
- *     }),
- *     MaxOpsBeforeYield,
- *     100
- *   )
- * })
- *
- * // Configure for high-performance scenarios
- * const highPerformanceProgram = Effect.gen(function*() {
- *   // Run with increased max ops for better performance (less yielding)
- *   return yield* Effect.provideService(
- *     Effect.gen(function*() {
- *       const maxOps = yield* MaxOpsBeforeYield
- *       yield* Effect.log(`High-performance max ops: ${maxOps}`)
- *
- *       // Run multiple concurrent tasks
- *       const tasks = Array.from(
- *         { length: 100 },
- *         (_, i) =>
- *           Effect.gen(function*() {
- *             yield* Effect.sleep(`${i * 10} millis`)
- *             return `Task ${i} completed`
- *           })
- *       )
- *
- *       return yield* Effect.all(tasks, { concurrency: "unbounded" })
- *     }),
- *     MaxOpsBeforeYield,
- *     10000
- *   )
- * })
- *
- * // Configure for fair scheduling
- * const fairSchedulingProgram = Effect.gen(function*() {
- *   // Run with lower max ops for more frequent yielding
- *   return yield* Effect.provideService(
- *     Effect.gen(function*() {
- *       const maxOps = yield* MaxOpsBeforeYield
- *       yield* Effect.log(`Fair scheduling max ops: ${maxOps}`)
- *
- *       const longRunningTask = Effect.gen(function*() {
- *         for (let i = 0; i < 1000; i++) {
- *           yield* Effect.sync(() => Math.random())
- *         }
- *         return "Long task completed"
- *       })
- *
- *       const quickTask = Effect.gen(function*() {
- *         yield* Effect.sleep("10 millis")
- *         return "Quick task completed"
- *       })
- *
- *       // Both tasks will execute fairly due to frequent yielding
- *       return yield* Effect.all([longRunningTask, quickTask], {
- *         concurrency: "unbounded"
- *       })
- *     }),
- *     MaxOpsBeforeYield,
- *     50
- *   )
- * })
- * ```
- *
- * @since 4.0.0
  * @category references
+ * @since 4.0.0
  */
-export const MaxOpsBeforeYield = ServiceMap.Reference<number>("effect/Scheduler/MaxOpsBeforeYield", {
+export const MaxOpsBeforeYield = Context.Reference<number>("effect/Scheduler/MaxOpsBeforeYield", {
   defaultValue: () => 2048
 })
 
@@ -286,9 +237,9 @@ export const MaxOpsBeforeYield = ServiceMap.Reference<number>("effect/Scheduler/
  * yield checks. When set to `true`, the fiber run loop won't call
  * `Scheduler.shouldYield`.
  *
- * @since 4.0.0
  * @category references
+ * @since 4.0.0
  */
-export const PreventSchedulerYield = ServiceMap.Reference<boolean>("effect/Scheduler/PreventSchedulerYield", {
+export const PreventSchedulerYield = Context.Reference<boolean>("effect/Scheduler/PreventSchedulerYield", {
   defaultValue: () => false
 })

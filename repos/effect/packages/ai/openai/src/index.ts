@@ -1,5 +1,5 @@
 /**
- * @since 1.0.0
+ * @since 4.0.0
  */
 
 // @barrel: Auto-generated exports. Do not edit manually.
@@ -15,14 +15,44 @@ export * as Generated from "./Generated.ts"
  * Provides a type-safe, Effect-based client for OpenAI operations including
  * completions, embeddings, and streaming responses.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 export * as OpenAiClient from "./OpenAiClient.ts"
 
 /**
- * @since 1.0.0
+ * @since 4.0.0
+ */
+export * as OpenAiClientGenerated from "./OpenAiClientGenerated.ts"
+
+/**
+ * The `OpenAiConfig` module provides contextual configuration for the
+ * `@effect/ai-openai` integration. It is used to customize how OpenAI clients
+ * are built and interpreted without threading configuration through every API
+ * call manually.
+ *
+ * The primary use case is installing an HTTP client transform with
+ * {@link withClientTransform}. This lets applications adapt the underlying
+ * OpenAI HTTP client for cross-cutting concerns such as custom middleware,
+ * instrumentation, proxying, or request policy changes while keeping the
+ * OpenAI service APIs unchanged.
+ *
+ * Configuration is scoped through Effect's context, so transforms only apply to
+ * the effect they are provided to and anything evaluated inside that scope.
+ * When multiple transforms are needed, compose them into a single
+ * `HttpClient => HttpClient` function before providing the configuration.
+ *
+ * @since 4.0.0
  */
 export * as OpenAiConfig from "./OpenAiConfig.ts"
+
+/**
+ * OpenAI Embedding Model implementation.
+ *
+ * Provides an EmbeddingModel implementation for OpenAI's embeddings API.
+ *
+ * @since 4.0.0
+ */
+export * as OpenAiEmbeddingModel from "./OpenAiEmbeddingModel.ts"
 
 /**
  * OpenAI error metadata augmentation.
@@ -30,7 +60,7 @@ export * as OpenAiConfig from "./OpenAiConfig.ts"
  * Provides OpenAI-specific metadata fields for AI error types through module
  * augmentation, enabling typed access to OpenAI error details.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 export * as OpenAiError from "./OpenAiError.ts"
 
@@ -40,9 +70,16 @@ export * as OpenAiError from "./OpenAiError.ts"
  * Provides a LanguageModel implementation for OpenAI's responses API,
  * supporting text generation, structured output, tool calling, and streaming.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 export * as OpenAiLanguageModel from "./OpenAiLanguageModel.ts"
+
+/**
+ * Minimal local OpenAI schemas used by the handwritten Responses client path.
+ *
+ * @since 4.0.0
+ */
+export * as OpenAiSchema from "./OpenAiSchema.ts"
 
 /**
  * OpenAI telemetry attributes for OpenTelemetry integration.
@@ -51,7 +88,7 @@ export * as OpenAiLanguageModel from "./OpenAiLanguageModel.ts"
  * semantic conventions, extending the base GenAI attributes with OpenAI-specific
  * request and response metadata.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 export * as OpenAiTelemetry from "./OpenAiTelemetry.ts"
 
@@ -61,6 +98,6 @@ export * as OpenAiTelemetry from "./OpenAiTelemetry.ts"
  * Provides tools that are natively supported by OpenAI's API, including
  * code interpreter, file search, and web search functionality.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 export * as OpenAiTool from "./OpenAiTool.ts"

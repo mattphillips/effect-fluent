@@ -275,16 +275,16 @@ describe("HashMap", () => {
   })
 
   describe("search operations", () => {
-    it("findFirst", () => {
+    it("findFirst returns an entry matching both key and value", () => {
       const map = HashMap.make(["a", 1], ["b", 2], ["c", 3])
       const result = HashMap.findFirst(map, (value) => value > 1)
-      expect(result).toEqual(["c", 3])
+      expect(result).toEqual(Option.some(["c", 3]))
     })
 
     it("findFirst - not found", () => {
       const map = HashMap.make(["a", 1], ["b", 2])
       const result = HashMap.findFirst(map, (value) => value > 5)
-      expect(result).toEqual(undefined)
+      expect(result).toEqual(Option.none())
     })
 
     it("some", () => {
@@ -345,7 +345,7 @@ describe("HashMap", () => {
       expect(sum).toBe(6)
     })
 
-    it("forEach", () => {
+    it("forEach visits each key and value", () => {
       const map = HashMap.make(["a", 1], ["b", 2])
       const collected: Array<[string, number]> = []
       HashMap.forEach(map, (value, key) => {
@@ -547,7 +547,7 @@ describe("HashMap", () => {
   })
 
   describe("stress tests", () => {
-    it("should handle many operations efficiently", () => {
+    it("handles many inserts, lookups, and removals", () => {
       let map = HashMap.empty<number, string>()
 
       // Add many entries

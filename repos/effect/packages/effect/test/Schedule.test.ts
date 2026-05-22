@@ -39,6 +39,46 @@ describe("Schedule", () => {
   })
 
   describe("sequencing", () => {
+    it.effect("tap - provides full metadata", () =>
+      Effect.gen(function*() {
+        const observed: Array<Schedule.Metadata<number, string>> = []
+        const schedule = Schedule.spaced(Duration.millis(250)).pipe(
+          Schedule.tap((metadata: Schedule.Metadata<number, string>) =>
+            Effect.sync(() => {
+              observed.push(metadata)
+            })
+          )
+        )
+        const step = yield* Schedule.toStep(schedule)
+        const first = yield* step(1_000, "a")
+        const second = yield* step(1_250, "b")
+
+        expect(first).toEqual([0, Duration.millis(250)])
+        expect(second).toEqual([1, Duration.millis(250)])
+        expect(observed).toEqual([
+          {
+            input: "a",
+            output: 0,
+            duration: Duration.millis(250),
+            attempt: 1,
+            start: 1_000,
+            now: 1_000,
+            elapsed: 0,
+            elapsedSincePrevious: 0
+          },
+          {
+            input: "b",
+            output: 1,
+            duration: Duration.millis(250),
+            attempt: 2,
+            start: 1_000,
+            now: 1_250,
+            elapsed: 250,
+            elapsedSincePrevious: 250
+          }
+        ])
+      }))
+
     it.effect("andThenResult - executes schedules sequentially to completion", () =>
       Effect.gen(function*() {
         const left = Schedule.fixed("500 millis").pipe(
@@ -98,7 +138,7 @@ describe("Schedule", () => {
         ])
       }))
 
-    it.effect("should recur on interval matching cron expression (second granularity))", () =>
+    it.effect("should recur on interval matching cron expression (second granularity)", () =>
       Effect.gen(function*() {
         const now = new Date(2024, 0, 1, 0, 0, 0).getTime()
         // At every third minute
@@ -238,6 +278,34 @@ describe("Schedule", () => {
           Duration.millis(500),
           Duration.millis(500),
           Duration.millis(500),
+          Duration.zero
+        ])
+      }))
+
+    it.effect("matches effect v3 when action duration exceeds the interval", () =>
+      Effect.gen(function*() {
+        const delays: Array<Duration.Duration> = []
+        const schedule = Schedule.fixed("1 seconds").pipe(
+          Schedule.while(({ attempt }) => Effect.succeed(attempt <= 5)),
+          Schedule.delays,
+          Schedule.map((delay) =>
+            Effect.sync(() => {
+              delays.push(delay)
+              return delays
+            })
+          )
+        )
+        yield* Effect.sleep("1.5 seconds").pipe(
+          Effect.schedule(schedule),
+          Effect.forkChild
+        )
+        yield* TestClock.setTime(Number.POSITIVE_INFINITY)
+        expect(delays).toEqual([
+          Duration.millis(1000),
+          Duration.zero,
+          Duration.zero,
+          Duration.zero,
+          Duration.zero,
           Duration.zero
         ])
       }))

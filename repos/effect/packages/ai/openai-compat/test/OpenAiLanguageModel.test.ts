@@ -277,6 +277,70 @@ describe("OpenAiLanguageModel", () => {
         assert.strictEqual(functionTool.function.strict, true)
       }))
 
+    it.effect("converts dynamic tools to function type", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const layer = OpenAiClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) => {
+              capturedRequest = request
+              return Effect.succeed(jsonResponse(
+                request,
+                makeChatCompletion({
+                  choices: [{
+                    index: 0,
+                    finish_reason: "stop",
+                    message: {
+                      role: "assistant",
+                      content: "Done"
+                    }
+                  }]
+                })
+              ))
+            })
+          ))
+        )
+
+        const inputSchema = {
+          type: "object",
+          properties: {
+            query: { type: "string" },
+            limit: { type: "number" }
+          },
+          required: ["query"],
+          additionalProperties: false
+        } as const
+
+        const DynamicTool = Tool.dynamic("DynamicTool", {
+          description: "A dynamic tool",
+          parameters: inputSchema
+        })
+
+        yield* LanguageModel.generateText({
+          prompt: "use dynamic tool",
+          toolkit: Toolkit.make(DynamicTool),
+          disableToolCallResolution: true
+        }).pipe(
+          Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini")),
+          Effect.provide(layer)
+        )
+
+        assert.isDefined(capturedRequest)
+        if (capturedRequest === undefined) {
+          return
+        }
+
+        const requestBody = yield* getRequestBody(capturedRequest)
+        const functionTool = requestBody.tools?.find((tool: any) =>
+          tool.type === "function" && tool.function?.name === "DynamicTool"
+        )
+        assert.isDefined(functionTool)
+        assert.strictEqual(functionTool.function.description, "A dynamic tool")
+        assert.deepStrictEqual(functionTool.function.parameters, inputSchema)
+      }))
+
     it.effect("maps provider apply_patch function call back to custom provider-defined tool", () =>
       Effect.gen(function*() {
         let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
@@ -750,6 +814,127 @@ describe("OpenAiLanguageModel", () => {
         })
       }))
 
+    it.effect("preserves fragmented stream tool call ids and names", () =>
+      Effect.gen(function*() {
+        const expectedParams = {
+          call_id: "patch_call_2",
+          operation: {
+            type: "delete_file",
+            path: "src/fragmented.ts"
+          }
+        }
+        const toolArguments = JSON.stringify(expectedParams)
+
+        const layer = OpenAiClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) =>
+              Effect.succeed(sseResponse(request, [
+                {
+                  id: "chatcmpl_apply_patch_fragmented_1",
+                  object: "chat.completion.chunk",
+                  model: "gpt-4o-mini",
+                  created: 1,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      tool_calls: [{
+                        index: 0,
+                        id: "patch_call_2",
+                        type: "function",
+                        function: {
+                          name: "apply_patch",
+                          arguments: toolArguments.slice(0, 24)
+                        }
+                      }]
+                    },
+                    finish_reason: null
+                  }]
+                },
+                {
+                  id: "chatcmpl_apply_patch_fragmented_1",
+                  object: "chat.completion.chunk",
+                  model: "gpt-4o-mini",
+                  created: 1,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      tool_calls: [{
+                        index: 0,
+                        function: {
+                          arguments: toolArguments.slice(24, 48)
+                        }
+                      }]
+                    },
+                    finish_reason: null
+                  }]
+                },
+                {
+                  id: "chatcmpl_apply_patch_fragmented_1",
+                  object: "chat.completion.chunk",
+                  model: "gpt-4o-mini",
+                  created: 1,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      tool_calls: [{
+                        index: 0,
+                        function: {
+                          arguments: toolArguments.slice(48)
+                        }
+                      }]
+                    },
+                    finish_reason: "tool_calls"
+                  }]
+                },
+                "[DONE]"
+              ]))
+            )
+          ))
+        )
+
+        const toolkit = Toolkit.make(CompatApplyPatchTool({}))
+        const toolkitLayer = toolkit.toLayer({
+          CompatApplyPatch: () =>
+            Effect.succeed({
+              status: "completed",
+              output: "deleted"
+            })
+        })
+
+        const partsChunk = yield* LanguageModel.streamText({
+          prompt: "Delete src/fragmented.ts",
+          toolkit,
+          disableToolCallResolution: true
+        }).pipe(
+          Stream.runCollect,
+          Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini")),
+          Effect.provide(toolkitLayer),
+          Effect.provide(layer)
+        )
+
+        const parts = globalThis.Array.from(partsChunk)
+
+        const start = parts.find((part) => part.type === "tool-params-start" && part.id === "patch_call_2")
+        assert.isDefined(start)
+        if (start?.type !== "tool-params-start") {
+          return
+        }
+        assert.strictEqual(start.name, "CompatApplyPatch")
+
+        assert.deepStrictEqual(decodeToolParamsFromStream(parts, "patch_call_2"), expectedParams)
+
+        const toolCall = parts.find((part) => part.type === "tool-call")
+        assert.isDefined(toolCall)
+        if (toolCall?.type !== "tool-call") {
+          return
+        }
+
+        assert.strictEqual(toolCall.id, "patch_call_2")
+        assert.strictEqual(toolCall.name, "CompatApplyPatch")
+        assert.deepStrictEqual(toolCall.params, expectedParams)
+      }))
+
     it.effect("streams known events and ignores unknown ones", () =>
       Effect.gen(function*() {
         let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
@@ -840,6 +1025,40 @@ describe("OpenAiLanguageModel", () => {
         const requestBody = yield* getRequestBody(capturedRequest)
         assert.strictEqual(requestBody.stream, true)
         assert.isTrue(capturedRequest.url.endsWith("/chat/completions"))
+      }))
+  })
+
+  describe("config", () => {
+    it.effect("does not leak library-only fields into request body", () =>
+      Effect.gen(function*() {
+        let capturedRequest: HttpClientRequest.HttpClientRequest | undefined
+
+        const layer = OpenAiClient.layer({ apiKey: Redacted.make("sk-test-key") }).pipe(
+          Layer.provide(Layer.succeed(
+            HttpClient.HttpClient,
+            makeHttpClient((request) => {
+              capturedRequest = request
+              return Effect.succeed(jsonResponse(request, makeChatCompletion()))
+            })
+          ))
+        )
+
+        yield* LanguageModel.generateText({ prompt: "test" }).pipe(
+          Effect.provide(OpenAiLanguageModel.model("gpt-4o-mini", {
+            fileIdPrefixes: ["file-"],
+            strictJsonSchema: false,
+            temperature: 0.5
+          })),
+          Effect.provide(layer)
+        )
+
+        assert.isDefined(capturedRequest)
+        if (capturedRequest === undefined) return
+
+        const requestBody = yield* getRequestBody(capturedRequest)
+        assert.strictEqual(requestBody.fileIdPrefixes, undefined)
+        assert.strictEqual(requestBody.strictJsonSchema, undefined)
+        assert.strictEqual(requestBody.temperature, 0.5)
       }))
   })
 })
@@ -976,6 +1195,23 @@ const getRequestBody = (request: HttpClientRequest.HttpClientRequest) =>
     }
     return yield* Effect.die(new Error("Expected Uint8Array body"))
   })
+
+const decodeToolParamsFromStream = (
+  parts: ReadonlyArray<any>,
+  toolCallId: string
+): Record<string, unknown> => {
+  const start = parts.find((part) => part.type === "tool-params-start" && part.id === toolCallId)
+  const end = parts.find((part) => part.type === "tool-params-end" && part.id === toolCallId)
+  assert.isDefined(start)
+  assert.isDefined(end)
+
+  const deltas = parts
+    .filter((part) => part.type === "tool-params-delta" && part.id === toolCallId)
+    .map((part) => part.delta)
+    .join("")
+
+  return JSON.parse(deltas) as Record<string, unknown>
+}
 
 const toSseBody = (events: ReadonlyArray<unknown>): string =>
   events.map((event) => {

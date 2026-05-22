@@ -13,22 +13,23 @@
  * - Stripping unsupported annotations and preserving only Anthropic-compatible
  *   formats and descriptions
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
-import type * as JsonSchema from "../../JsonSchema.ts"
+import * as JsonSchema from "../../JsonSchema.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
 import * as AST from "../../SchemaAST.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
+import * as Tool from "./Tool.ts"
 
 /**
- * Transforms a `Schema.Codec` into a form compatible with Anthropic's
- * structured output constraints.
+ * Transforms a `Schema.Codec` into a form compatible with Anthropic's structured output constraints.
  *
- * The transformation walks the schema AST and rewrites constructs that
- * Anthropic does not support natively:
+ * **Details**
+ *
+ * The transformation walks the schema AST and rewrites constructs that Anthropic does not support natively:
  *
  * - **Tuples** are converted to objects with numeric string keys (e.g.
  *   `"0"`, `"1"`) since Anthropic does not support tuple schemas. Rest
@@ -45,8 +46,8 @@ import * as Transformation from "../../SchemaTransformation.ts"
  * If the schema is already compatible, the original codec is returned
  * unchanged.
  *
- * @since 1.0.0
  * @category Codec Transformation
+ * @since 4.0.0
  */
 export function toCodecAnthropic<T, E, RD, RE>(
   schema: Schema.Codec<T, E, RD, RE>
@@ -57,8 +58,8 @@ export function toCodecAnthropic<T, E, RD, RE>(
   const to = schema.ast
   const from = recur(AST.toEncoded(to))
   const codec = from === to ? schema : Schema.make<typeof schema>(AST.decodeTo(from, to, Transformation.passthrough()))
-  const document = Schema.toJsonSchemaDocument(codec)
-  const jsonSchema = document.schema
+  const document = JsonSchema.resolveTopLevel$ref(Schema.toJsonSchemaDocument(codec))
+  const jsonSchema = { ...document.schema }
   if (Object.keys(document.definitions).length > 0) {
     jsonSchema.$defs = document.definitions
   }
@@ -225,6 +226,9 @@ function recur(ast: AST.AST): AST.AST {
         }
       } else if (ast.indexSignatures.length === 1 && ast.propertySignatures.length === 0) {
         const is = ast.indexSignatures[0]
+        if (Tool.isEmptyParamsRecord(is)) {
+          return ast
+        }
         // records are not supported by Anthropic, so we translate them to arrays of key-value pairs
         if (annotations !== undefined && typeof annotations.description === "string") {
           annotations.description = `${RECORD_DESCRIPTION}; ${annotations.description}`

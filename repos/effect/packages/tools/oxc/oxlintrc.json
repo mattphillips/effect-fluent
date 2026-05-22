@@ -8,6 +8,7 @@
   },
   "rules": {
     // Effect custom rules
+    "effect/no-bigint-literals": "error",
     "effect/no-import-from-barrel-package": ["error", {
       "checkPatterns": [
         "^effect$",
@@ -19,6 +20,7 @@
     }],
     "effect/no-js-extension-imports": "error",
     "effect/no-opaque-instance-fields": "error",
+    "effect/jsdocs": "error",
     // Tune native rules
     // Import rules
     "typescript/consistent-type-imports": ["error", {
@@ -45,6 +47,7 @@
     "unicorn/no-accessor-recursion": "error",
     "oxc/no-map-spread": "off",
     "eslint/object-shorthand": "off",
+    "eslint/no-shadow": "off",
     "eslint/no-unused-vars": "off",
     "eslint/require-yield": "off",
     "eslint/no-fallthrough": "off",
@@ -56,6 +59,7 @@
     "unicorn/require-post-message-target-origin": "off",
     "unicorn/prefer-add-event-listener": "off",
     "unicorn/prefer-set-has": "off",
+    "no-dangling-underscore": "off",
     "typescript/no-explicit-any": "off",
     "typescript/no-empty-interface": "off",
     "typescript/ban-ts-comment": "off",

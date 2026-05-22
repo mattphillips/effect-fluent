@@ -1,5 +1,23 @@
 /**
- * @since 1.0.0
+ * Shared Node-compatible implementation of Effect's `FileSystem` service.
+ *
+ * This module adapts Node's `node:fs`, `node:os`, and `node:path` APIs into a
+ * layer that can be provided to Effect programs running on Node-compatible
+ * runtimes. It is used by platform packages to provide file and directory I/O,
+ * permissions, links, metadata, temporary files and directories, and file
+ * watching through the `FileSystem` service.
+ *
+ * Paths are passed to Node filesystem APIs, so relative paths are resolved by
+ * the current working directory and platform path rules still apply. Node
+ * filesystem failures are translated into `PlatformError` values, while invalid
+ * arguments become `BadArgument` failures. Open files are scoped resources with
+ * tracked read and write positions; append mode lets the operating system choose
+ * the write offset. File watching is exposed as a stream and follows
+ * `node:fs.watch` semantics unless a `WatchBackend` is provided, so recursive
+ * support, event coalescing, and reported paths can vary by runtime and
+ * platform.
+ *
+ * @since 4.0.0
  */
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
@@ -232,7 +250,7 @@ const makeFile = (() => {
     readonly fd: FileSystem.File.Descriptor
     private readonly append: boolean
 
-    private position: bigint = 0n
+    private position: bigint = BigInt(0)
 
     constructor(
       fd: FileSystem.File.Descriptor,
@@ -285,19 +303,19 @@ const makeFile = (() => {
         const position = this.position
         return Effect.map(
           nodeReadAlloc(this.fd, { buffer, position }),
-          (bytesRead): Buffer | undefined => {
+          (bytesRead): Option.Option<Buffer> => {
             if (bytesRead === 0) {
-              return undefined
+              return Option.none()
             }
 
             this.position = position + BigInt(bytesRead)
             if (bytesRead === sizeNumber) {
-              return buffer
+              return Option.some(buffer)
             }
 
             const dst = Buffer.allocUnsafeSlow(bytesRead)
             buffer.copy(dst, 0, 0, bytesRead)
-            return dst
+            return Option.some(dst)
           }
         )
       })
@@ -468,19 +486,19 @@ const makeFileInfo = (stat: NFS.Stats): FileSystem.File.Info => ({
     stat.isSocket() ?
     "Socket" :
     "Unknown",
-  mtime: stat.mtime,
-  atime: stat.atime,
-  birthtime: stat.birthtime,
+  mtime: Option.fromNullishOr(stat.mtime),
+  atime: Option.fromNullishOr(stat.atime),
+  birthtime: Option.fromNullishOr(stat.birthtime),
   dev: stat.dev,
-  rdev: stat.rdev,
-  ino: stat.ino,
+  rdev: Option.fromNullishOr(stat.rdev),
+  ino: Option.fromNullishOr(stat.ino),
   mode: stat.mode,
-  nlink: stat.nlink,
-  uid: stat.uid,
-  gid: stat.gid,
+  nlink: Option.fromNullishOr(stat.nlink),
+  uid: Option.fromNullishOr(stat.uid),
+  gid: Option.fromNullishOr(stat.gid),
   size: FileSystem.Size(stat.size),
-  blksize: stat.blksize !== undefined ? FileSystem.Size(stat.blksize) : undefined,
-  blocks: stat.blocks
+  blksize: stat.blksize !== undefined ? Option.some(FileSystem.Size(stat.blksize)) : Option.none(),
+  blocks: Option.fromNullishOr(stat.blocks)
 })
 const stat = (() => {
   const nodeStat = effectify(
@@ -572,15 +590,14 @@ const watchNode = (path: string) =>
     )
   )
 
-const watch = (backend: FileSystem.WatchBackend["Service"] | undefined, path: string) =>
+const watch = (backend: Option.Option<FileSystem.WatchBackend["Service"]>, path: string) =>
   stat(path).pipe(
-    Effect.map((stat) => {
-      if (backend) {
-        const stream = backend.register(path, stat)
-        if (stream) return stream
-      }
-      return watchNode(path)
-    }),
+    Effect.map((stat) =>
+      backend.pipe(
+        Option.flatMap((_) => _.register(path, stat)),
+        Option.getOrElse(() => watchNode(path))
+      )
+    ),
     Stream.unwrap
   )
 
@@ -630,13 +647,16 @@ const makeFileSystem = Effect.map(Effect.serviceOption(FileSystem.WatchBackend),
     truncate,
     utimes,
     watch(path) {
-      return watch(Option.getOrUndefined(backend), path)
+      return watch(backend, path)
     },
     writeFile
   }))
 
 /**
- * @since 1.0.0
- * @category Layers
+ * Provides the `FileSystem` service backed by Node filesystem APIs, including
+ * file operations, directory operations, links, metadata, and file watching.
+ *
+ * @category layers
+ * @since 4.0.0
  */
 export const layer: Layer.Layer<FileSystem.FileSystem> = Layer.effect(FileSystem.FileSystem)(makeFileSystem)

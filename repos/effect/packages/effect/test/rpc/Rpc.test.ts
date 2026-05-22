@@ -1,8 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Schema } from "effect"
+import { Cause, Context, Effect, Exit, Option, Schema } from "effect"
 import { Headers } from "effect/unstable/http"
 import { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { RequestId } from "effect/unstable/rpc/RpcMessage"
+import * as RpcSchema from "effect/unstable/rpc/RpcSchema"
 
 const TestGroup = RpcGroup.make(
   Rpc.make("one"),
@@ -19,7 +20,13 @@ describe("Rpc", () => {
         Effect.provide(TwoHandler)
       )
       const result = yield* handler(void 0, {
-        clientId: 1,
+        client: {
+          id: 1,
+          annotations: Context.empty(),
+          annotate() {
+            return this
+          }
+        },
         requestId: RequestId(1n),
         headers: Headers.empty
       })
@@ -44,5 +51,23 @@ describe("Rpc", () => {
     assert(Exit.isFailure(roundTripped))
     const defect = Cause.squash(roundTripped.cause)
     assert.deepStrictEqual(defect, error)
+  })
+
+  it("RpcSchema.getStreamSchemas returns Option", () => {
+    const plain = Rpc.make("plainSchemas", { success: Schema.String })
+    const stream = Rpc.make("streamSchemas", {
+      success: Schema.String,
+      error: Schema.Number,
+      stream: true
+    })
+    const none = RpcSchema.getStreamSchemas(plain.successSchema)
+    assert(Option.isNone(none))
+
+    const some = RpcSchema.getStreamSchemas(stream.successSchema)
+    if (Option.isNone(some)) {
+      assert.fail("Expected stream schema")
+    }
+    assert.strictEqual(some.value.success, Schema.String)
+    assert.strictEqual(some.value.error, Schema.Number)
   })
 })

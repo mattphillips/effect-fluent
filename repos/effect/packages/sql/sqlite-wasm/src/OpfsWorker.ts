@@ -1,5 +1,24 @@
 /**
- * @since 1.0.0
+ * Worker-side entry point for SQLite WASM databases stored in the browser
+ * Origin Private File System.
+ *
+ * This module opens `@effect/wa-sqlite` with the OPFS access-handle VFS and
+ * serves the message protocol used by `SqliteClient.make`. Run it from a
+ * dedicated worker, or from a `SharedWorker` connection port, when an
+ * application needs durable local SQLite storage for local-first data, offline
+ * caches, client-side migrations, or import/export workflows that keep the
+ * database off the main thread.
+ *
+ * The worker owns the SQLite connection for the lifetime of `run`: it posts a
+ * `ready` message after opening the database, responds to query, import,
+ * export, and update-hook messages, and releases the database when the client
+ * sends `close` or the surrounding scope is interrupted. Because OPFS support
+ * depends on the browser and origin, applications should start this worker only
+ * in supported secure contexts, close unused ports so access handles are
+ * released, and coordinate multiple tabs or workers before opening or migrating
+ * the same OPFS database.
+ *
+ * @since 4.0.0
  */
 /// <reference lib="webworker" />
 // oxlint-disable-next-line effect/no-import-from-barrel-package
@@ -7,12 +26,17 @@ import * as WaSqlite from "@effect/wa-sqlite"
 import SQLiteESMFactory from "@effect/wa-sqlite/dist/wa-sqlite.mjs"
 import { AccessHandlePoolVFS } from "@effect/wa-sqlite/src/examples/AccessHandlePoolVFS.js"
 import * as Effect from "effect/Effect"
-import { SqlError } from "effect/unstable/sql/SqlError"
+import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError"
 import type { OpfsWorkerMessage } from "./internal/opfsWorker.ts"
 
+const classifyError = (cause: unknown, message: string, operation: string) =>
+  classifySqliteError(cause, { message, operation })
+
 /**
+ * Configuration for the SQLite OPFS worker, including the message port used for the client protocol and the OPFS database name to open.
+ *
  * @category models
- * @since 1.0.0
+ * @since 4.0.0
  */
 export interface OpfsWorkerConfig {
   readonly port: EventTarget & Pick<MessagePort, "postMessage" | "close">
@@ -20,8 +44,10 @@ export interface OpfsWorkerConfig {
 }
 
 /**
- * @category constructor
- * @since 1.0.0
+ * Runs the SQLite OPFS worker loop, opening the configured database, posting a ready message, handling query/import/export/update-hook messages, and closing when a close message is received.
+ *
+ * @category constructors
+ * @since 4.0.0
  */
 export const run = (
   options: OpfsWorkerConfig
@@ -34,7 +60,7 @@ export const run = (
     const db = yield* Effect.acquireRelease(
       Effect.try({
         try: () => sqlite3.open_v2(options.dbName, undefined, "opfs"),
-        catch: (cause) => new SqlError({ cause, message: "Failed to open database" })
+        catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to open database", "openDatabase") })
       }),
       (db) => Effect.sync(() => sqlite3.close(db))
     )

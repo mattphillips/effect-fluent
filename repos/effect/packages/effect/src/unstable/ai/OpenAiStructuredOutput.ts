@@ -1,20 +1,22 @@
 /**
  * Provides codec transformations for OpenAI structured output.
  *
- * @since 1.0.0
+ * @since 4.0.0
  */
 import * as Arr from "../../Array.ts"
-import type * as JsonSchema from "../../JsonSchema.ts"
+import * as JsonSchema from "../../JsonSchema.ts"
 import * as Option from "../../Option.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Rec from "../../Record.ts"
 import * as Schema from "../../Schema.ts"
 import * as AST from "../../SchemaAST.ts"
 import * as Transformation from "../../SchemaTransformation.ts"
+import * as Tool from "./Tool.ts"
 
 /**
- * Transforms a `Schema.Codec` into a form compatible with OpenAI's
- * structured output constraints.
+ * Transforms a `Schema.Codec` into a form compatible with OpenAI's structured output constraints.
+ *
+ * **Details**
  *
  * The transformation walks the schema AST and rewrites constructs that
  * OpenAI does not support natively:
@@ -36,8 +38,8 @@ import * as Transformation from "../../SchemaTransformation.ts"
  * If the schema is already compatible, the original codec is returned
  * unchanged.
  *
- * @since 1.0.0
  * @category Codec Transformation
+ * @since 4.0.0
  */
 export function toCodecOpenAI<T, E, RD, RE>(
   schema: Schema.Codec<T, E, RD, RE>
@@ -48,7 +50,7 @@ export function toCodecOpenAI<T, E, RD, RE>(
   const to = schema.ast
   const from = recurOpenAI(AST.toEncoded(to))
   const codec = from === to ? schema : Schema.make<typeof schema>(AST.decodeTo(from, to, Transformation.passthrough()))
-  const document = Schema.toJsonSchemaDocument(codec)
+  const document = JsonSchema.resolveTopLevel$ref(Schema.toJsonSchemaDocument(codec))
   const jsonSchema = rewriteOpenAI(document.schema)
   if (Object.keys(document.definitions).length > 0) {
     jsonSchema.$defs = Rec.map(document.definitions, rewriteOpenAI)
@@ -80,6 +82,9 @@ function rewriteOpenAI(schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema {
     } else {
       out[k] = v
     }
+  }
+  if (out.type === "object" && out.properties === undefined && out.additionalProperties === false) {
+    out.properties = {}
   }
   return out
 }
@@ -243,6 +248,9 @@ function recurOpenAI(ast: AST.AST): AST.AST {
         }
       } else if (ast.indexSignatures.length === 1 && ast.propertySignatures.length === 0) {
         const is = ast.indexSignatures[0]
+        if (Tool.isEmptyParamsRecord(is)) {
+          return ast
+        }
         // records are not supported by OpenAI, so we translate them to arrays of key-value pairs
         if (annotations !== undefined && typeof annotations.description === "string") {
           annotations.description = `${RECORD_DESCRIPTION}; ${annotations.description}`

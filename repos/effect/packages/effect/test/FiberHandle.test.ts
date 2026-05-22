@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import { assertFalse, assertTrue, strictEqual } from "@effect/vitest/utils"
-import { Deferred, Effect, Exit, Fiber, FiberHandle, pipe, Ref } from "effect"
+import { Deferred, Effect, Exit, Fiber, FiberHandle, Option, pipe, Ref } from "effect"
 import { TestClock } from "effect/testing"
 
 describe("FiberHandle", () => {
-  it.effect("interrupts fibers", () =>
+  it.effect("interrupts the current fiber when the scope closes", () =>
     Effect.gen(function*() {
       const ref = yield* (Ref.make(0))
       yield* pipe(
@@ -42,7 +42,31 @@ describe("FiberHandle", () => {
       strictEqual(yield* Ref.get(ref), 2)
     }))
 
-  it.effect("join", () =>
+  it.effect("get and getUnsafe", () =>
+    Effect.gen(function*() {
+      const handle = yield* FiberHandle.make<string>()
+
+      assert.deepStrictEqual(FiberHandle.getUnsafe(handle), Option.none())
+      assert.deepStrictEqual(yield* FiberHandle.get(handle), Option.none())
+
+      const fiber = yield* FiberHandle.run(handle, Effect.never)
+
+      const unsafeFiber = FiberHandle.getUnsafe(handle)
+      if (Option.isNone(unsafeFiber)) {
+        assert.fail("expected Option.some from getUnsafe")
+        return
+      }
+      strictEqual(unsafeFiber.value, fiber)
+
+      const safeFiber = yield* FiberHandle.get(handle)
+      if (Option.isNone(safeFiber)) {
+        assert.fail("expected Option.some from get")
+        return
+      }
+      strictEqual(safeFiber.value, fiber)
+    }))
+
+  it.effect("join ignores managed replacement interruptions and fails with child errors", () =>
     Effect.gen(function*() {
       const handle = yield* FiberHandle.make()
       FiberHandle.setUnsafe(handle, Effect.runFork(Effect.void))
@@ -51,7 +75,7 @@ describe("FiberHandle", () => {
       strictEqual(result, "fail")
     }))
 
-  it.effect("onlyIfMissing", () =>
+  it.effect("onlyIfMissing keeps the current fiber and interrupts rejected starts", () =>
     Effect.gen(function*() {
       const handle = yield* FiberHandle.make()
       const fiberA = yield* FiberHandle.run(handle, Effect.never)

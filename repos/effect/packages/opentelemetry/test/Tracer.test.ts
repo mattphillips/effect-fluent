@@ -52,7 +52,7 @@ describe("Tracer", () => {
         assert.instanceOf(child, Tracer.OtelSpan)
         assert.strictEqual(child.name, "child")
         assert.isDefined(child.parent)
-        assert.strictEqual((child.parent as Tracer.OtelSpan).name, "parent")
+        assert.strictEqual((child.parent.valueOrUndefined! as Tracer.OtelSpan).name, "parent")
       }).pipe(
         Effect.provide(TracingLive)
       ))
@@ -120,13 +120,13 @@ describe("Tracer", () => {
         const effect = Effect.gen(function*() {
           const span = yield* Effect.currentParentSpan
           assert(span._tag === "Span")
-          if (span.parent === undefined) {
+          if (span.parent._tag === "None") {
             return yield* Effect.die("No parent span")
           }
-          return span.parent
+          return span.parent.value
         }).pipe(Effect.withSpan("child"))
 
-        const services = yield* Effect.services<never>()
+        const services = yield* Effect.context<never>()
 
         yield* Effect.promise(async () => {
           await OtelApi.trace.getTracer("test").startActiveSpan("otel-span", {
@@ -136,7 +136,7 @@ describe("Tracer", () => {
             try {
               const parent = await effect.pipe(
                 Tracer.withSpanContext(span.spanContext()),
-                Effect.provideServices(services),
+                Effect.provideContext(services),
                 Effect.runPromise
               )
               const { spanId, traceId } = span.spanContext()
