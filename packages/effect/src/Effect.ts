@@ -39,7 +39,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   static suspend<A, E, R>(thunk: LazyArg<Effect<A, E, R>>): Effect<A, E, R> {
-    return new Effect(_Effect.suspend(() => thunk().asEffect()));
+    return new Effect(_Effect.suspend(() => thunk().effect));
   }
 
   static fail<E>(error: E): Effect<never, E> {
@@ -91,20 +91,20 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   ): Effect<A, E, R> {
     return new Effect(
       _Effect.callback(function (this: Scheduler.Scheduler, resume, signal) {
-        const result = register.call(this, (effect) => resume(effect.asEffect()), signal);
+        const result = register.call(this, (effect) => resume(effect.effect), signal);
         if (result !== undefined) {
-          return result.asEffect();
+          return result.effect;
         }
       })
     );
   }
 
   static fromOption<A>(option: Option<A>): Effect<A, Cause.NoSuchElementError> {
-    return new Effect(_Effect.fromOption(option.asOption()));
+    return new Effect(_Effect.fromOption(option.option));
   }
 
   static fromResult<A, E>(result: Result<A, E>): Effect<A, E> {
-    return new Effect(_Effect.fromResult(result.asResult()));
+    return new Effect(_Effect.fromResult(result.result));
   }
 
   static gen<Eff extends Gen.Yieldable<any, any, any>, AEff>(
@@ -130,7 +130,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   static scoped<A, E, R>(self: Effect<A, E, R>): Effect<A, E, Exclude<R, Scope.Scope>> {
-    return new Effect(_Effect.scoped(self.asEffect()));
+    return new Effect(_Effect.scoped(self.effect));
   }
 
   static get never(): Effect<never> {
@@ -225,7 +225,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
         readonly discard?: boolean | undefined;
       }
     ): Effect<any, E, R> => {
-      return new Effect(_Effect.forEach(iterable, (a, i) => f(a, i).asEffect(), options));
+      return new Effect(_Effect.forEach(iterable, (a, i) => f(a, i).effect, options));
     }
   );
 
@@ -234,7 +234,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
     f: (a: A, i: number) => Effect<B, E, R>,
     options?: { readonly concurrency?: Concurrency }
   ): Effect<[excluded: Array<E>, satisfying: Array<B>], never, R> {
-    return new Effect(_Effect.partition(elements, (a, i) => f(a, i).asEffect(), options));
+    return new Effect(_Effect.partition(elements, (a, i) => f(a, i).effect, options));
   }
 
   private readonly _effect: _Effect.Effect<A, E, R>;
@@ -244,7 +244,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
     this._effect = effect;
   }
 
-  asEffect(): _Effect.Effect<A, E, R> {
+  get effect(): _Effect.Effect<A, E, R> {
     return this._effect;
   }
 
@@ -281,7 +281,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   flatMap<B, E2, R2>(f: (a: A) => Effect<B, E2, R2>): Effect<B, E | E2, R | R2> {
-    return new Effect(_Effect.flatMap(this._effect, (a) => f(a).asEffect()));
+    return new Effect(_Effect.flatMap(this._effect, (a) => f(a).effect));
   }
 
   static flatten<A, E, R, E2, R2>(self: Effect<Effect<A, E, R>, E2, R2>): Effect<A, E | E2, R | R2> {
@@ -294,11 +294,11 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
     if (isFunction(f)) {
       return new Effect(
         _Effect.andThen(this._effect, (a: A) => {
-          return f(a).asEffect();
+          return f(a).effect;
         })
       );
     }
-    return new Effect(_Effect.andThen(this._effect, f.asEffect()));
+    return new Effect(_Effect.andThen(this._effect, f.effect));
   }
 
   tap<B, E2, R2>(f: (a: NoInfer<A>) => Effect<B, E2, R2>): Effect<A, E | E2, R | R2>;
@@ -307,44 +307,44 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
     if (isFunction(f)) {
       return new Effect(
         _Effect.tap(this._effect, (a: NoInfer<A>) => {
-          return f(a).asEffect();
+          return f(a).effect;
         })
       );
     }
-    return new Effect(_Effect.tap(this._effect, f.asEffect()));
+    return new Effect(_Effect.tap(this._effect, f.effect));
   }
 
   tapError<X, E2, R2>(f: (e: E) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapError(this._effect, (e) => f(e).asEffect()));
+    return new Effect(_Effect.tapError(this._effect, (e) => f(e).effect));
   }
 
   tapDefect<B, E2, R2>(f: (defect: unknown) => Effect<B, E2, R2>): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapDefect(this._effect, (defect) => f(defect).asEffect()));
+    return new Effect(_Effect.tapDefect(this._effect, (defect) => f(defect).effect));
   }
 
   tapErrorTag<K extends Tags<E>, A1, E1, R1>(
     k: K,
     f: (e: ExtractTag<E, K>) => Effect<A1, E1, R1>
   ): Effect<A, E | E1, R | R1> {
-    return new Effect(_Effect.tapErrorTag(this._effect, k, (e: any) => f(e).asEffect()));
+    return new Effect(_Effect.tapErrorTag(this._effect, k, (e: any) => f(e).effect));
   }
 
   tapCause<X, E2, R2>(f: (cause: Cause.Cause<E>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCause(this._effect, (cause) => f(cause).asEffect()));
+    return new Effect(_Effect.tapCause(this._effect, (cause) => f(cause).effect));
   }
 
   tapCauseIf<B, E2, R2>(
     predicate: (cause: Cause.Cause<E>) => boolean,
     f: (cause: Cause.Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCauseIf(this._effect, predicate, (cause) => f(cause).asEffect()));
+    return new Effect(_Effect.tapCauseIf(this._effect, predicate, (cause) => f(cause).effect));
   }
 
   tapCauseFilter<B, E2, R2, EB, X extends Cause.Cause<any>>(
     filter: Filter<Cause.Cause<E>, EB, X>,
     f: (a: EB, cause: Cause.Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, cause).asEffect()));
+    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, cause).effect));
   }
 
   get flip(): Effect<E, A, R> {

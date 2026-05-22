@@ -33,7 +33,7 @@ const runPromise: <E, A>(_: Effect<A, E, never>, ctx?: V.TestContext | undefined
     },
     (effect, _, ctx) => _Effect.runPromise(effect, { signal: ctx?.signal })
     // TODO: replace with fluent fnUntraced
-  )(effect.asEffect(), ctx);
+  )(effect.effect, ctx);
 
 /** @internal */
 const runTest =
@@ -218,7 +218,7 @@ export const layer =
           (effect) =>
             contextEffect.flatMap((context) =>
               // TODO: replace with fluent provide
-              Effect.scoped(effect).asEffect().pipe(_Effect.provide(context), Effect.wrap)
+              Effect.scoped(effect).effect.pipe(_Effect.provide(context), Effect.wrap)
             ),
           it
         ),
@@ -267,7 +267,7 @@ export const flakyTest = <A, E, R>(
   timeout: Duration.Input = Duration.seconds(30)
 ) =>
   pipe(
-    self.asEffect(),
+    self.effect,
     _Effect.scoped,
     _Effect.sandbox,
     _Effect.retry(
@@ -289,7 +289,7 @@ export const makeMethods = (it: V.TestAPI): Vitest.Vitest.Methods =>
   Object.assign(it, {
     effect: makeTester<Scope.Scope>(
       // TODO: replace with fluent effect
-      flow(Effect.scoped, (a) => a.asEffect(), _Effect.provide(TestEnv), Effect.wrap),
+      flow(Effect.scoped, (a) => a.effect, _Effect.provide(TestEnv), Effect.wrap),
       it
     ),
     live: makeTester<Scope.Scope>(Effect.scoped, it),

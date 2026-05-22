@@ -49,7 +49,7 @@ describe('Effect', () => {
         const result = yield* database.query('SELECT 1');
         deepStrictEqual(result, [1]);
       })
-        .asEffect()
+        .effect
         .pipe(
           // TODO: Replace `provideService` with a more fluent version
           _Effect.provideService(Database, { query: () => _Effect.succeed([1]) }),
@@ -71,7 +71,7 @@ describe('Effect', () => {
         const result = yield* database.query('SELECT 1');
         deepStrictEqual(result, [1]);
       })
-        .asEffect()
+        .effect
         .pipe(
           // TODO: Replace `provideService` with a more fluent version
           _Effect.provideService(Database, { query: () => Effect.succeed([1]) }),

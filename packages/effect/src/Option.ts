@@ -23,28 +23,28 @@ export interface OptionIterator<T extends Option<any>> {
 }
 
 abstract class OptionBase<out A> extends Inspectable {
-  private readonly option: _Option.Option<A>;
+  private readonly _option: _Option.Option<A>;
   abstract readonly _tag: 'Some' | 'None';
   abstract readonly _op: 'Some' | 'None';
   readonly [OptionTypeId]: OptionTypeId = OptionTypeId;
 
   constructor(option: _Option.Option<A>) {
     super();
-    this.option = option;
+    this._option = option;
   }
 
-  asOption(): _Option.Option<A> {
-    return this.option;
+  get option(): _Option.Option<A> {
+    return this._option;
   }
 
   // --- Equal & Hash ---
 
   [Equal.symbol](that: unknown): boolean {
-    return is(that) && Equal.equals(this.option, that.asOption());
+    return is(that) && Equal.equals(this._option, that.option);
   }
 
   [Hash.symbol](): number {
-    return Hash.hash(this.option);
+    return Hash.hash(this._option);
   }
 
   // --- Type guards ---
@@ -66,27 +66,27 @@ abstract class OptionBase<out A> extends Inspectable {
   // --- Instance methods: Pattern matching ---
 
   match<B, C = B>(options: { readonly onNone: LazyArg<B>; readonly onSome: (a: A) => C }): B | C {
-    return _Option.match(this.option, options);
+    return _Option.match(this._option, options);
   }
 
   // --- Instance methods: Mapping ---
 
   map<B>(f: (a: A) => B): Option<B> {
-    return wrap(_Option.map(this.option, f));
+    return wrap(_Option.map(this._option, f));
   }
 
   as<B>(value: B): Option<B> {
-    return wrap(_Option.as(this.option, value));
+    return wrap(_Option.as(this._option, value));
   }
 
   get asVoid(): Option<void> {
-    return wrap(_Option.asVoid(this.option));
+    return wrap(_Option.asVoid(this._option));
   }
 
   // --- Instance methods: Sequencing ---
 
   flatMap<B>(f: (a: A) => Option<B>): Option<B> {
-    return wrap(_Option.flatMap(this.option, (a) => f(a).option));
+    return wrap(_Option.flatMap(this._option, (a) => f(a).option));
   }
 
   andThen<B>(f: (a: A) => Option<B>): Option<B>;
@@ -104,67 +104,67 @@ abstract class OptionBase<out A> extends Inspectable {
   }
 
   tap<X>(f: (a: A) => Option<X>): Option<A> {
-    return wrap(_Option.tap(this.option, (a) => f(a).option));
+    return wrap(_Option.tap(this._option, (a) => f(a).option));
   }
 
   flatMapNullishOr<B>(f: (a: A) => B): Option<NonNullable<B>> {
-    return wrap(_Option.flatMapNullishOr(this.option, f));
+    return wrap(_Option.flatMapNullishOr(this._option, f));
   }
 
   // --- Instance methods: Getters ---
 
   getOrElse<B>(onNone: LazyArg<B>): A | B {
-    return _Option.getOrElse(this.option, onNone);
+    return _Option.getOrElse(this._option, onNone);
   }
 
   get getOrNull(): A | null {
-    return _Option.getOrNull(this.option);
+    return _Option.getOrNull(this._option);
   }
 
   get getOrUndefined(): A | undefined {
-    return _Option.getOrUndefined(this.option);
+    return _Option.getOrUndefined(this._option);
   }
 
   get getOrThrow(): A {
-    return _Option.getOrThrow(this.option);
+    return _Option.getOrThrow(this._option);
   }
 
   getOrThrowWith(onNone: () => unknown): A {
-    return _Option.getOrThrowWith(this.option, onNone);
+    return _Option.getOrThrowWith(this._option, onNone);
   }
 
   // --- Instance methods: Fallbacks ---
 
   orElse<B>(that: LazyArg<Option<B>>): Option<A | B> {
-    return wrap(_Option.orElse(this.option, () => that().option));
+    return wrap(_Option.orElse(this._option, () => that().option));
   }
 
   orElseSome<B>(value: LazyArg<B>): Option<A | B> {
-    return wrap(_Option.orElseSome(this.option, value));
+    return wrap(_Option.orElseSome(this._option, value));
   }
 
   // --- Instance methods: Zipping ---
 
   zipWith<B, C>(that: Option<B>, f: (a: A, b: B) => C): Option<C> {
-    return wrap(_Option.zipWith(this.option, that.option, f));
+    return wrap(_Option.zipWith(this._option, that.option, f));
   }
 
   zipRight<B>(that: Option<B>): Option<B> {
-    return wrap(_Option.zipRight(this.option, that.option));
+    return wrap(_Option.zipRight(this._option, that.option));
   }
 
   zipLeft<B>(that: Option<B>): Option<A> {
-    return wrap(_Option.zipLeft(this.option, that.option));
+    return wrap(_Option.zipLeft(this._option, that.option));
   }
 
   product<B>(that: Option<B>): Option<[A, B]> {
-    return wrap(_Option.product(this.option, that.option));
+    return wrap(_Option.product(this._option, that.option));
   }
 
   productMany(others: Iterable<Option<A>>): Option<[A, ...Array<A>]> {
     return wrap(
       _Option.productMany(
-        this.option,
+        this._option,
         (function* (iter: Iterable<Option<A>>) {
           for (const o of iter) yield o.option;
         })(others)
@@ -177,40 +177,40 @@ abstract class OptionBase<out A> extends Inspectable {
   filter<B extends A>(refinement: Refinement<A, B>): Option<B>;
   filter(predicate: Predicate<A>): Option<A>;
   filter(predicate: Predicate<A>): Option<A> {
-    return wrap(_Option.filter(this.option, predicate));
+    return wrap(_Option.filter(this._option, predicate));
   }
 
   filterMap<B, X>(f: Filter<A, B, X>): Option<B> {
-    return wrap(_Option.filterMap(this.option, f));
+    return wrap(_Option.filterMap(this._option, f));
   }
 
   partitionMap<B, C>(f: (a: A) => Result.Result<C, B>): [left: Option<B>, right: Option<C>] {
-    const [left, right] = _Option.partitionMap(this.option, f);
+    const [left, right] = _Option.partitionMap(this._option, f);
     return [wrap(left), wrap(right)];
   }
 
   // --- Instance methods: Conversions/checks ---
 
   get toArray(): Array<A> {
-    return _Option.toArray(this.option);
+    return _Option.toArray(this._option);
   }
 
   exists(predicate: Predicate<A>): boolean {
-    return _Option.exists(this.option, predicate);
+    return _Option.exists(this._option, predicate);
   }
 
   contains(value: A): boolean {
-    return _Option.contains(this.option, value);
+    return _Option.contains(this._option, value);
   }
 
   // --- Instance methods: Do notation ---
 
   bindTo<N extends string>(name: N): Option<{ [K in N]: A }> {
-    return wrap(_Option.bindTo(this.option, name));
+    return wrap(_Option.bindTo(this._option, name));
   }
 
   with<B>(f: (option: _Option.Option<A>) => _Option.Option<B>): Option<B> {
-    return wrap(f(this.option));
+    return wrap(f(this._option));
   }
 }
 
@@ -353,7 +353,7 @@ const bind: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Option<B>
   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
-    return wrap(_Option.bind(self.asOption(), name, (a: A) => f(a).asOption()));
+    return wrap(_Option.bind(self.option, name, (a: A) => f(a).option));
   }
 );
 
@@ -374,7 +374,7 @@ const let_: {
     name: Exclude<N, keyof A>,
     f: (a: NoInfer<A>) => Option<B>
   ): Option<{ [K in N | keyof A]: K extends keyof A ? A[K] : B }> => {
-    return wrap(_Option.let(self.asOption(), name, (a: A) => f(a))) as any;
+    return wrap(_Option.let(self.option, name, (a: A) => f(a))) as any;
   }
 );
 
@@ -431,7 +431,7 @@ const reduceCompact: {
   <B, A>(b: B, f: (b: B, a: A) => B): (self: Iterable<Option<A>>) => B;
   <A, B>(self: Iterable<Option<A>>, b: B, f: (b: B, a: A) => B): B;
 } = dual(3, <A, B>(self: Iterable<Option<A>>, b: B, f: (b: B, a: A) => B): B => {
-  const nativeCollection = Array.from(self).map((opt) => opt.asOption());
+  const nativeCollection = Array.from(self).map((opt) => opt.option);
   return _Option.reduceCompact(nativeCollection, b, f);
 });
 
@@ -442,7 +442,7 @@ const lift2 = <A, B, C>(
   (self: Option<A>, that: Option<B>): Option<C>;
 } => {
   return dual(2, (self: Option<A>, that: Option<B>): Option<C> => {
-    return wrap(_Option.lift2(f)(self.asOption(), that.asOption()));
+    return wrap(_Option.lift2(f)(self.option, that.option));
   });
 };
 

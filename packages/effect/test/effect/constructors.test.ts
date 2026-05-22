@@ -65,7 +65,7 @@ describe('Effect', () => {
         return Effect.gen(function* () {
           const defect = new Error('Failed');
           const result = yield* Effect.die(defect)
-            .asEffect()
+            .effect
             // TODO: Replace `catchDefect` with a more fluent version
             .pipe(_Effect.catchDefect((defect) => _Effect.succeed(defect)));
           strictEqual(result, defect);
@@ -390,7 +390,7 @@ describe('Effect', () => {
           const handle = yield* Effect.forEach([1, 2, 3], (n) => Effect.succeed(n).with(_Effect.delay(50)), {
             concurrency: 'inherit'
           })
-            .asEffect()
+            .effect
             .pipe(_Effect.withConcurrency('unbounded'), _Effect.forkChild);
           yield* TestClock.adjust(90);
           deepStrictEqual(handle.pollUnsafe(), Exit.succeed([1, 2, 3]));
