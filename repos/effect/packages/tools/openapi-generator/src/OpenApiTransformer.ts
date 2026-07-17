@@ -263,11 +263,11 @@ export const make = (
 ): ${name} => {
   ${helpers.join("\n  ")}
   const decodeSuccess =
-    <Schema extends ${importName}.Top>(schema: Schema) =>
+    <Schema extends ${importName}.Constraint>(schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       HttpClientResponse.schemaBodyJson(schema)(response)
   const decodeError =
-    <const Tag extends string, Schema extends ${importName}.Top>(tag: Tag, schema: Schema) =>
+    <const Tag extends string, Schema extends ${importName}.Constraint>(tag: Tag, schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       Effect.flatMap(
         HttpClientResponse.schemaBodyJson(schema)(response),
@@ -459,7 +459,7 @@ export const make = (
  *
  * **When to use**
  *
- * Use this layer when generated HttpClient code should perform runtime response
+ * Use when you use this layer when generated HttpClient code should perform runtime response
  * decoding with generated Effect Schema values.
  *
  * @category code generation
@@ -869,7 +869,7 @@ export const make = (
  *
  * **When to use**
  *
- * Use this layer for the `httpclient-type-only` generator format, where the
+ * Use when you use this layer for the `httpclient-type-only` generator format, where the
  * generated client relies on TypeScript types instead of runtime Schema
  * decoding.
  *
@@ -917,7 +917,7 @@ const sseRequestSource = (_importName: string) =>
      Type,
      DecodingServices
     >(
-      schema: Schema.Decoder<Type, DecodingServices>
+      schema: Schema.ConstraintDecoder<Type, DecodingServices>
     ) =>
     (
       request: HttpClientRequest.HttpClientRequest

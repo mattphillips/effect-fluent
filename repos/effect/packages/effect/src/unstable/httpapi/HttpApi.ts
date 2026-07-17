@@ -1,37 +1,21 @@
 /**
- * The `HttpApi` module defines the top-level contract for an Effect HTTP API.
- * An `HttpApi` names an API and collects one or more `HttpApiGroup`s, whose
- * endpoints describe the request inputs, response schemas, middleware, and
- * annotations that later drive server builders, clients, and OpenAPI
- * generation.
+ * Describes an Effect HTTP API as groups of endpoints.
  *
- * Use this module when you want to compose a domain API from endpoint groups,
- * combine APIs from multiple modules, apply a shared path prefix or middleware,
- * attach annotations, or reflect over the final route shape. Implementations are
- * provided separately with `HttpApiBuilder.group`, and the completed API is
- * registered with `HttpApiBuilder.layer`.
- *
- * A few composition details are worth keeping in mind: group identifiers are
- * used as keys, so adding another group with the same identifier replaces the
- * previous one; `prefix` and `middleware` are applied to the groups and
- * endpoints already present when they are called; and `addHttpApi` merges the
- * added API's annotations into its groups. During reflection, success and error
- * schemas are grouped by the HTTP status recorded on their `HttpApiSchema`
- * annotations, endpoints without an explicit success schema default to
- * `NoContent`, and middleware error schemas are included with endpoint errors.
- * Extra schemas supplied through `AdditionalSchemas` must have an `identifier`
- * annotation so they can be emitted as OpenAPI components.
+ * An `HttpApi` value is data: it has an identifier, annotations, and groups of
+ * endpoints that describe request inputs, responses, middleware, and route
+ * metadata. The same description can be used by server builders, generated
+ * clients, URL builders, OpenAPI generation, and reflection tools.
  *
  * @since 4.0.0
  */
 import type { NonEmptyReadonlyArray } from "../../Array.ts"
 import * as Context from "../../Context.ts"
+import * as internalRecord from "../../internal/record.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Record from "../../Record.ts"
 import type * as Schema from "../../Schema.ts"
-import type * as AST from "../../SchemaAST.ts"
-import type { Mutable } from "../../Types.ts"
+import type * as SchemaAST from "../../SchemaAST.ts"
 import type { PathInput } from "../http/HttpRouter.ts"
 import * as HttpApiEndpoint from "./HttpApiEndpoint.ts"
 import type * as HttpApiGroup from "./HttpApiGroup.ts"
@@ -46,7 +30,14 @@ const TypeId = "~effect/httpapi/HttpApi"
  * @category guards
  * @since 4.0.0
  */
-export const isHttpApi = (u: unknown): u is Any => Predicate.hasProperty(u, TypeId)
+export const isHttpApi = (u: unknown): u is Top => Predicate.hasProperty(u, TypeId)
+
+/**
+ * Groups indexed by their identifier.
+ */
+type GroupMap<Groups> = {
+  readonly [Group in Groups as HttpApiGroup.Identifier<Group>]: Group
+}
 
 /**
  * An `HttpApi` is a collection of HTTP API groups and endpoints that represents a
@@ -54,7 +45,7 @@ export const isHttpApi = (u: unknown): u is Any => Predicate.hasProperty(u, Type
  *
  * **When to use**
  *
- * Endpoint implementations can be provided with `HttpApiBuilder.group`, and the
+ * Use when endpoint implementations can be provided with `HttpApiBuilder.group`, and the
  * completed API can be registered with `HttpApiBuilder.layer`.
  *
  * @category models
@@ -62,23 +53,38 @@ export const isHttpApi = (u: unknown): u is Any => Predicate.hasProperty(u, Type
  */
 export interface HttpApi<
   out Id extends string,
-  out Groups extends HttpApiGroup.Any = never
+  in out Groups extends HttpApiGroup.Constraint = never
 > extends Pipeable {
   new(_: never): {}
   readonly [TypeId]: typeof TypeId
   readonly identifier: Id
-  readonly groups: Record.ReadonlyRecord<string, Groups>
+  readonly groups: GroupMap<Groups>
   readonly annotations: Context.Context<never>
 
   /**
    * Add a `HttpApiGroup` to the `HttpApi`.
    */
-  add<A extends NonEmptyReadonlyArray<HttpApiGroup.Any>>(...groups: A): HttpApi<Id, Groups | A[number]>
+  add<const A extends NonEmptyReadonlyArray<HttpApiGroup.Constraint>>(...groups: A): HttpApi<Id, Groups | A[number]>
 
   /**
-   * Add another `HttpApi` to the `HttpApi`.
+   * Adds every group from another `HttpApi` while preserving its annotation scope.
+   *
+   * **When to use**
+   *
+   * Use when you want to compose an API from groups declared and annotated under another API.
+   *
+   * **Details**
+   *
+   * The added API is flattened into this API rather than retained as a nested value. Each added group
+   * is copied with the added API's annotations, leaving the added API unchanged. Annotation precedence
+   * from least to most specific is this API, the added API, the group, and then the endpoint.
+   *
+   * **Gotchas**
+   *
+   * Annotations from the added API do not become top-level annotations of the result and do not affect
+   * groups already present in this API. They remain scoped to the groups and endpoints being added.
    */
-  addHttpApi<Id2 extends string, Groups2 extends HttpApiGroup.Any>(
+  addHttpApi<Id2 extends string, Groups2 extends HttpApiGroup.Constraint>(
     api: HttpApi<Id2, Groups2>
   ): HttpApi<Id, Groups | Groups2>
 
@@ -115,7 +121,7 @@ export interface HttpApi<
  * @category models
  * @since 4.0.0
  */
-export interface Any {
+export interface Constraint {
   readonly [TypeId]: typeof TypeId
 }
 
@@ -126,7 +132,7 @@ export interface Any {
  * @category models
  * @since 4.0.0
  */
-export type AnyWithProps = HttpApi<string, HttpApiGroup.AnyWithProps>
+export interface Top extends HttpApi<string, HttpApiGroup.Top> {}
 
 const Proto = {
   [TypeId]: TypeId,
@@ -134,77 +140,78 @@ const Proto = {
     return pipeArguments(this, arguments)
   },
   add(
-    this: AnyWithProps,
-    ...toAdd: NonEmptyReadonlyArray<HttpApiGroup.AnyWithProps>
+    this: Top,
+    ...toAdd: NonEmptyReadonlyArray<HttpApiGroup.Top>
   ) {
     const groups = { ...this.groups }
     for (const group of toAdd) {
-      groups[group.identifier] = group
+      internalRecord.set(groups, group.identifier, group)
     }
     return makeProto({
-      identifier: this.identifier,
-      groups,
-      annotations: this.annotations
+      ...optionsFromApi(this),
+      groups
     })
   },
   addHttpApi(
-    this: AnyWithProps,
-    api: AnyWithProps
+    this: Top,
+    api: Top
   ) {
     const newGroups = { ...this.groups }
     for (const key in api.groups) {
-      const newGroup: Mutable<HttpApiGroup.AnyWithProps> = api.groups[key]
-      newGroup.annotations = Context.merge(api.annotations, newGroup.annotations)
-      newGroups[key] = newGroup as any
+      const group = api.groups[key]
+      internalRecord.set(
+        newGroups,
+        key,
+        group.annotateMerge(Context.merge(api.annotations, group.annotations))
+      )
     }
     return makeProto({
-      identifier: this.identifier,
-      groups: newGroups,
-      annotations: this.annotations
+      ...optionsFromApi(this),
+      groups: newGroups
     })
   },
-  prefix(this: AnyWithProps, prefix: PathInput) {
+  prefix(this: Top, prefix: PathInput) {
     return makeProto({
-      identifier: this.identifier,
-      groups: Record.map(this.groups, (group) => group.prefix(prefix)),
-      annotations: this.annotations
+      ...optionsFromApi(this),
+      groups: Record.map(this.groups, (group) => group.prefix(prefix))
     })
   },
-  middleware(this: AnyWithProps, tag: HttpApiMiddleware.AnyService) {
+  middleware(this: Top, tag: HttpApiMiddleware.AnyService) {
     return makeProto({
-      identifier: this.identifier,
-      groups: Record.map(this.groups, (group) => group.middleware(tag as any)),
-      annotations: this.annotations
+      ...optionsFromApi(this),
+      groups: Record.map(this.groups, (group) => group.middleware(tag as any))
     })
   },
-  annotate(this: AnyWithProps, key: Context.Key<any, any>, value: any) {
+  annotate(this: Top, key: Context.Key<any, any>, value: any) {
     return makeProto({
-      identifier: this.identifier,
-      groups: this.groups,
+      ...optionsFromApi(this),
       annotations: Context.add(this.annotations, key, value)
     })
   },
-  annotateMerge(this: AnyWithProps, annotations: Context.Context<never>) {
+  annotateMerge(this: Top, annotations: Context.Context<never>) {
     return makeProto({
-      identifier: this.identifier,
-      groups: this.groups,
+      ...optionsFromApi(this),
       annotations: Context.merge(this.annotations, annotations)
     })
   }
 }
 
-const makeProto = <Id extends string, Groups extends HttpApiGroup.Any>(
+const optionsFromApi = (api: Top) => ({
+  identifier: api.identifier,
+  groups: api.groups,
+  annotations: api.annotations
+})
+
+const makeProto = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   options: {
     readonly identifier: Id
-    readonly groups: Record.ReadonlyRecord<string, Groups>
+    readonly groups: Record.ReadonlyRecord<string, HttpApiGroup.Constraint>
     readonly annotations: Context.Context<never>
   }
 ): HttpApi<Id, Groups> => {
   function HttpApi() {}
   Object.setPrototypeOf(HttpApi, Proto)
-  HttpApi.groups = options.groups
-  HttpApi.annotations = options.annotations
-  return HttpApi as any
+  return Object.assign(HttpApi, options) as any
 }
 
 /**
@@ -212,8 +219,9 @@ const makeProto = <Id extends string, Groups extends HttpApiGroup.Any>(
  *
  * **When to use**
  *
- * Add groups with `add` or `addHttpApi`, provide endpoint implementations with
- * `HttpApiBuilder.group`, and register the API with `HttpApiBuilder.layer`.
+ * Use when you need to start defining an HTTP API, add groups with `add` or
+ * `addHttpApi`, provide endpoint implementations with `HttpApiBuilder.group`,
+ * and register the API with `HttpApiBuilder.layer`.
  *
  * @category constructors
  * @since 4.0.0
@@ -221,37 +229,37 @@ const makeProto = <Id extends string, Groups extends HttpApiGroup.Any>(
 export const make = <const Id extends string>(identifier: Id): HttpApi<Id, never> =>
   makeProto({
     identifier,
-    groups: new Map() as any,
+    groups: {},
     annotations: Context.empty()
   })
 
 /**
- * Walks the groups and endpoints in an `HttpApi`.
+ * Describes the groups and endpoints in an `HttpApi`.
  *
  * **Details**
  *
  * The callbacks receive each group or endpoint with merged annotations, endpoint
  * middleware, and response schemas grouped by HTTP status.
  *
- * @category Reflection
+ * @category reflection
  * @since 4.0.0
  */
-export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
+export const reflect = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   self: HttpApi<Id, Groups>,
   options: {
     readonly predicate?:
       | Predicate.Predicate<{
-        readonly endpoint: HttpApiEndpoint.AnyWithProps
-        readonly group: HttpApiGroup.AnyWithProps
+        readonly endpoint: HttpApiEndpoint.Top
+        readonly group: HttpApiGroup.Top
       }>
       | undefined
     readonly onGroup: (options: {
-      readonly group: HttpApiGroup.AnyWithProps
+      readonly group: HttpApiGroup.Top
       readonly mergedAnnotations: Context.Context<never>
     }) => void
     readonly onEndpoint: (options: {
-      readonly group: HttpApiGroup.AnyWithProps
-      readonly endpoint: HttpApiEndpoint.AnyWithProps
+      readonly group: HttpApiGroup.Top
+      readonly endpoint: HttpApiEndpoint.Top
       readonly mergedAnnotations: Context.Context<never>
       readonly middleware: ReadonlySet<HttpApiMiddleware.AnyService>
       readonly successes: ReadonlyMap<number, readonly [Schema.Top, ...Array<Schema.Top>]>
@@ -259,14 +267,14 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
     }) => void
   }
 ) => {
-  const groups = Object.values(self.groups) as any as Array<HttpApiGroup.AnyWithProps>
+  const groups = Object.values(self.groups) as any as Array<HttpApiGroup.Top>
   for (const group of groups) {
     const groupAnnotations = Context.merge(self.annotations, group.annotations)
     options.onGroup({
       group,
       mergedAnnotations: groupAnnotations
     })
-    const endpoints = Object.values(group.endpoints) as Iterable<HttpApiEndpoint.AnyWithProps>
+    const endpoints = Object.values(group.endpoints) as Iterable<HttpApiEndpoint.Top>
     for (const endpoint of endpoints) {
       if (
         options.predicate && !options.predicate({
@@ -297,7 +305,7 @@ export const reflect = <Id extends string, Groups extends HttpApiGroup.Any>(
 
 const extractResponseContent = (
   schemas: Array<Schema.Top>,
-  getStatus: (ast: AST.AST) => number
+  getStatus: (ast: SchemaAST.AST) => number
 ): ReadonlyMap<number, [Schema.Top, ...Array<Schema.Top>]> => {
   const map = new Map<number, [Schema.Top, ...Array<Schema.Top>]>()
 
@@ -306,6 +314,7 @@ const extractResponseContent = (
   return map
 
   function add(schema: Schema.Top) {
+    if (HttpApiSchema.isStreamSchema(schema)) return
     const ast = schema.ast
     const status = getStatus(ast)
     const schemas = map.get(status)
@@ -321,10 +330,10 @@ const extractResponseContent = (
  * Adds additional schemas to components/schemas.
  * The provided schemas must have a `identifier` annotation.
  *
- * @category tags
+ * @category services
  * @since 4.0.0
  */
 export class AdditionalSchemas extends Context.Service<
   AdditionalSchemas,
-  ReadonlyArray<Schema.Top>
+  ReadonlyArray<Schema.Constraint>
 >()("effect/httpapi/HttpApi/AdditionalSchemas") {}

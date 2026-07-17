@@ -1,29 +1,12 @@
 /**
- * The `Response` module provides data structures to represent responses from
- * large language models.
+ * Defines a shared data model for AI model output.
  *
- * This module defines the complete structure of AI model responses, including
- * various content parts for text, reasoning, tool calls, files, and metadata,
- * supporting both streaming and non-streaming responses.
- *
- * **Example** (Creating response parts)
- *
- * ```ts
- * import { Response } from "effect/unstable/ai"
- *
- * // Create a simple text response part
- * const textResponse = Response.makePart("text", {
- *   text: "The weather is sunny today!"
- * })
- *
- * // Create a tool call response part
- * const toolCallResponse = Response.makePart("tool-call", {
- *   id: "call_123",
- *   name: "get_weather",
- *   params: { city: "San Francisco" },
- *   providerExecuted: false
- * })
- * ```
+ * Responses are represented as typed parts so different providers can expose
+ * text, reasoning, tool calls, files, sources, metadata, finish information, and
+ * errors through one shape. The same model is used for complete responses and
+ * streaming responses, where start, delta, and end parts describe content as it
+ * arrives. This module also carries provider metadata and schemas used by tools
+ * that need to validate response parts.
  *
  * @since 4.0.0
  */
@@ -1399,7 +1382,7 @@ export interface ToolCallPartMetadata extends ProviderMetadata {}
  * @category schemas
  * @since 4.0.0
  */
-export const ToolCallPart: <const Name extends string, Params extends Schema.Top>(
+export const ToolCallPart: <const Name extends string, Params extends Schema.Constraint>(
   name: Name,
   params: Params
 ) => Schema.Struct<
@@ -1414,7 +1397,7 @@ export const ToolCallPart: <const Name extends string, Params extends Schema.Top
       Schema.$Record<Schema.String, Schema.Codec<Schema.Json>>
     >
   }
-> = <const Name extends string, Params extends Schema.Top>(
+> = <const Name extends string, Params extends Schema.Constraint>(
   name: Name,
   params: Params
 ) =>
@@ -1612,7 +1595,11 @@ export interface ToolResultPartMetadata extends ProviderMetadata {}
  * @category schemas
  * @since 4.0.0
  */
-export const ToolResultPart: <const Name extends string, Success extends Schema.Top, Failure extends Schema.Top>(
+export const ToolResultPart: <
+  const Name extends string,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint
+>(
   name: Name,
   success: Success,
   failure: Failure
@@ -1650,8 +1637,8 @@ export const ToolResultPart: <const Name extends string, Success extends Schema.
   >
 > = <
   const Name extends string,
-  Success extends Schema.Top,
-  Failure extends Schema.Top
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint
 >(
   name: Name,
   success: Success,
@@ -1889,6 +1876,11 @@ export interface FilePartMetadata extends ProviderMetadata {}
 /**
  * Schema for validation and encoding of file parts.
  *
+ * **Details**
+ *
+ * Decoded `data` is a `Uint8Array`; encoded `data` is a base64 string through
+ * `Schema.Uint8ArrayFromBase64`.
+ *
  * @category schemas
  * @since 4.0.0
  */
@@ -1981,6 +1973,20 @@ export interface DocumentSourcePartMetadata extends ProviderMetadata {}
 
 /**
  * Schema for validation and encoding of document source parts.
+ *
+ * **When to use**
+ *
+ * Use to validate or encode document source references returned as response
+ * content parts.
+ *
+ * **Details**
+ *
+ * Validates `type: "source"`, `sourceType: "document"`, required `id`,
+ * `mediaType`, and `title`, optional `fileName`, and the metadata fields
+ * inherited from response parts.
+ *
+ * @see {@link UrlSourcePart} for URL source references
+ * @see {@link DocumentSourcePartEncoded} for the encoded document source representation
  *
  * @category schemas
  * @since 4.0.0
@@ -2471,7 +2477,12 @@ export interface FinishPartEncoded extends BasePartEncoded<"finish", FinishPartM
 export interface FinishPartMetadata extends ProviderMetadata {}
 
 /**
- * Schema for validation and encoding of finish parts.
+ * Schema for finish response parts.
+ *
+ * **Details**
+ *
+ * Validates `type: "finish"`, `reason` through `FinishReason`, `usage`
+ * through `Usage`, and optional provider HTTP response details.
  *
  * @category schemas
  * @since 4.0.0
@@ -2547,6 +2558,16 @@ export interface ErrorPartMetadata extends ProviderMetadata {}
 
 /**
  * Schema for validation and encoding of error parts.
+ *
+ * **Details**
+ *
+ * Validates and encodes error parts with `type: "error"` and an `error` payload
+ * kept as `unknown`.
+ *
+ * **Gotchas**
+ *
+ * The decoded `error` value is not guaranteed to be an `Error`; narrow it before
+ * reading `Error`-specific fields.
  *
  * @category schemas
  * @since 4.0.0

@@ -1,22 +1,13 @@
 /**
- * Composable HTTP client service for executing `HttpClientRequest` values and
- * receiving `HttpClientResponse` values inside Effect programs.
+ * Provides the service used to run outgoing HTTP requests.
  *
- * This module provides the `HttpClient` service tag, method-specific accessors,
- * constructors for low-level runtimes, and middleware-style combinators for
- * common client concerns such as request rewriting, response filtering, retries,
- * redirects, cookies, rate limiting, and tracing. It is intended for code that
- * needs dependency-injected outbound HTTP calls, reusable clients customized for
- * an API, or cross-cutting behavior layered around a concrete platform client.
- *
- * Responses are successful Effects even for non-2xx status codes unless a
- * filter such as `filterStatus` or `filterStatusOk` is applied. Request
- * middleware is ordered by whether it prepends to or appends after the existing
- * preprocessing pipeline, so use `mapRequestInput` for transformations that
- * should run before previously installed request middleware and `mapRequest`
- * for transformations that should run after it. Non-scoped responses are tied to
- * an abort controller for interruption cleanup; use `withScope` when the request
- * lifetime should instead be controlled by a surrounding `Scope`.
+ * `HttpClient` executes immutable `HttpClientRequest` values and returns
+ * `HttpClientResponse` values. Keeping HTTP behind this service lets programs,
+ * tests, and generated API clients use the same request model without depending
+ * on one concrete platform transport. This module includes request accessors,
+ * constructors and layers, request and response transformations, status
+ * filtering, retries, rate limiting, cookies, redirect handling, scoped request
+ * abortion, and tracing support.
  *
  * @since 4.0.0
  */
@@ -49,7 +40,7 @@ import * as HttpClientResponse from "./HttpClientResponse.ts"
 import * as HttpIncomingMessage from "./HttpIncomingMessage.ts"
 import * as HttpMethod from "./HttpMethod.ts"
 import * as TraceContext from "./HttpTraceContext.ts"
-import * as UrlParams from "./UrlParams.ts"
+import * as Url from "./Url.ts"
 
 const TypeId = "~effect/http/HttpClient"
 
@@ -145,9 +136,14 @@ export declare namespace HttpClient {
 }
 
 /**
- * Service tag for the default `HttpClient` used by HTTP client accessors.
+ * Service tag for the default outgoing HTTP client service.
  *
- * @category tags
+ * **When to use**
+ *
+ * Use to provide the default outgoing HTTP client service used by request
+ * accessors such as `execute`, `get`, and `post`.
+ *
+ * @category services
  * @since 4.0.0
  */
 export const HttpClient: Context.Service<HttpClient, HttpClient> = Context.Service<HttpClient, HttpClient>(
@@ -372,7 +368,15 @@ export const catchTag: {
       e: ExtractTag<E, K extends NonEmptyReadonlyArray<string> ? K[number] : K>
     ) => Effect.Effect<HttpClientResponse.HttpClientResponse, E1, R1>
   ): HttpClient.With<E1 | ExcludeTag<E, K extends NonEmptyReadonlyArray<string> ? K[number] : K>, R1 | R> =>
-    transformResponse(self, Effect.catchTag(tag, f))
+    transformResponse(
+      self,
+      (effect) =>
+        Effect.catchTag<HttpClientResponse.HttpClientResponse, E, R, K, R1, E1, HttpClientResponse.HttpClientResponse>(
+          effect,
+          tag,
+          f
+        )
+    )
 )
 
 /**
@@ -633,7 +637,7 @@ export const make = (
       Effect.withFiber((fiber) => {
         const scopedController = scopedRequests.get(request)
         const controller = scopedController ?? new AbortController()
-        const urlResult = UrlParams.makeUrl(request.url, request.urlParams, Option.getOrUndefined(request.hash))
+        const urlResult = Url.make(request.url, request.urlParams, Option.getOrUndefined(request.hash))
         if (Result.isFailure(urlResult)) {
           return Effect.fail(
             new Error.HttpClientError({
@@ -871,7 +875,7 @@ export const retry: {
  *
  * **When to use**
  *
- * Use `retryOn` to focus on retrying errors, transient responses, or both.
+ * Use to focus on retrying errors, transient responses, or both.
  *
  * **Details**
  *
@@ -1020,6 +1024,10 @@ export declare namespace WithRateLimiter {
      * Disable automatic limits updates from response headers.
      */
     readonly disableResponseInspection?: boolean | undefined
+    /**
+     * Disable adaptive learning from `Retry-After` responses.
+     */
+    readonly disableAdaptiveLearning?: boolean | undefined
   }
 }
 
@@ -1062,6 +1070,7 @@ export const withRateLimiter: {
   const resolveTokens: (request: HttpClientRequest.HttpClientRequest) => number = typeof tokensOption === "function"
     ? tokensOption
     : constant(tokensOption ?? 1)
+  const adaptiveLearningEnabled = !options.disableAdaptiveLearning
 
   const getState = (key: string): RateLimiterState => {
     const current = states.get(key)
@@ -1092,12 +1101,38 @@ export const withRateLimiter: {
     const key = resolveKey(request)
     const tokens = Math.max(resolveTokens(request), 1)
     const current = getState(key)
-    function retry(response: HttpClientResponse.HttpClientResponse) {
+    function retry(retryAfter: Duration.Duration | undefined) {
       if (options.disableResponseInspection) return loop(effect, request)
-      const retryAfter = parseRetryAfter(clock, getHeader(response.headers, "retry-after"))
       return retryAfter
         ? Effect.flatMap(Effect.sleep(retryAfter), () => loop(effect, request))
         : loop(effect, request)
+    }
+    const inspectResponse = (
+      response: HttpClientResponse.HttpClientResponse,
+      adaptive: RateLimiter.AdaptiveConsumeResult | undefined
+    ) => {
+      onResponse?.(clock, key, response.headers, tokens)
+      if (options.disableResponseInspection || response.status !== 429) {
+        return Effect.succeed<Duration.Duration | undefined>(undefined)
+      }
+      const retryAfter = parseRetryAfter(clock, getHeader(response.headers, "retry-after"))
+      if (retryAfter === undefined) {
+        return Effect.succeed<Duration.Duration | undefined>(undefined)
+      }
+      const delay = parseRateLimitWindow(clock, response.headers) ?? retryAfter
+      if (adaptive === undefined) {
+        return Effect.succeed<Duration.Duration | undefined>(delay)
+      }
+      return Effect.as(
+        options.limiter.adaptiveFeedback({
+          key,
+          epoch: adaptive.epoch,
+          tokens,
+          status: response.status,
+          retryAfter: delay
+        }),
+        delay
+      )
     }
     return Effect.flatMap(
       options.limiter.consume({
@@ -1109,21 +1144,52 @@ export const withRateLimiter: {
         tokens
       }),
       ({ delay }) => {
-        const run = Effect.matchEffect(effect, {
-          onSuccess(response) {
-            onResponse?.(clock, key, response.headers, tokens)
-            if (response.status !== 429) return Effect.succeed(response)
-            return retry(response)
-          },
-          onFailure(error) {
-            if (isTooManyRequestsHttpClientError(error)) {
-              onResponse?.(clock, key, error.reason.response.headers, tokens)
-              return retry(error.reason.response)
-            }
-            return Effect.fail(error)
+        const runAdaptive = (): Effect.Effect<
+          HttpClientResponse.HttpClientResponse,
+          E | RateLimiter.RateLimiterError,
+          R
+        > => {
+          const runRequest = (adaptive: RateLimiter.AdaptiveConsumeResult | undefined) => {
+            const request = Effect.matchEffect(effect, {
+              onSuccess(response) {
+                return Effect.flatMap(inspectResponse(response, adaptive), (retryAfter) => {
+                  if (response.status !== 429) return Effect.succeed(response)
+                  return retry(retryAfter)
+                })
+              },
+              onFailure(error) {
+                if (isTooManyRequestsHttpClientError(error)) {
+                  return Effect.flatMap(
+                    inspectResponse(error.reason.response, adaptive),
+                    (retryAfter) => retry(retryAfter)
+                  )
+                }
+                return Effect.fail(error)
+              }
+            })
+            return adaptive === undefined || Duration.isZero(adaptive.delay)
+              ? request
+              : Effect.delay(request, adaptive.delay)
           }
-        })
-        return Duration.isZero(delay) ? run : Effect.delay(run, delay)
+          if (!adaptiveLearningEnabled) {
+            return runRequest(undefined)
+          }
+          return Effect.flatMap(
+            options.limiter.adaptiveConsume({
+              key,
+              tokens,
+              fallbackLimit: current.limit,
+              fallbackWindow: current.window
+            }),
+            (adaptive) => {
+              if (!Duration.isZero(adaptive.delay) && adaptive.phase === "cooldown") {
+                return Effect.flatMap(Effect.sleep(adaptive.delay), runAdaptive)
+              }
+              return runRequest(adaptive)
+            }
+          )
+        }
+        return Duration.isZero(delay) ? runAdaptive() : Effect.flatMap(Effect.sleep(delay), runAdaptive)
       }
     )
   })
@@ -1176,13 +1242,6 @@ const parseRateLimitWindow = (
   clock: Clock,
   headers: Headers.Headers
 ): Duration.Duration | undefined => {
-  const retryAfter = parseRetryAfter(
-    clock,
-    getHeader(headers, "retry-after")
-  )
-  if (retryAfter !== undefined) {
-    return retryAfter
-  }
   const resetAfter = parseResetAfter(getHeader(headers, "ratelimit-reset-after", "x-ratelimit-reset-after"))
   if (resetAfter !== undefined) {
     return resetAfter
@@ -1328,7 +1387,12 @@ export const tapRequest: {
 )
 
 /**
- * Associates a `Ref` of cookies with the client for handling cookies across requests.
+ * Adds a `Ref` of cookies to the client for handling cookies across requests.
+ *
+ * **When to use**
+ *
+ * Use to add shared cookie storage to a client so response cookies are retained
+ * and sent by later requests.
  *
  * @category cookies
  * @since 4.0.0
@@ -1361,9 +1425,9 @@ export const withCookiesRef: {
 )
 
 /**
- * Ties the lifetime of the `HttpClientRequest` to a `Scope`.
+ * Attaches the lifetime of the `HttpClientRequest` to a `Scope`.
  *
- * @category Scope
+ * @category resource management
  * @since 4.0.0
  */
 export const withScope = <E, R>(
@@ -1382,7 +1446,7 @@ export const withScope = <E, R>(
   )
 
 /**
- * Follows HTTP redirects up to a specified number of times.
+ * Enables following HTTP redirects up to a specified number of times.
  *
  * @category redirects
  * @since 4.0.0

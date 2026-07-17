@@ -1,21 +1,11 @@
 /**
- * Utilities for constructing immutable outgoing HTTP client requests.
+ * Describes immutable outgoing HTTP client requests.
  *
- * This module models the request data passed to HTTP clients and adapters:
- * method, URL, query parameters, hash, headers, and body. It provides
- * method-specific constructors, pipeable combinators for adding authentication
- * headers and accepted media types, helpers for JSON, form, stream, and file
- * bodies, and conversions to and from the Web `Request` type.
- *
- * Request construction keeps the base URL, query parameters, and hash as
- * separate fields until conversion. Passing a `URL` extracts its search
- * parameters and fragment into those structured fields, while string URLs are
- * kept as provided. Use the `setUrlParam` helpers when replacing query values
- * and the `appendUrlParam` helpers when multiple values for the same key should
- * be preserved. Setting a body also updates `Content-Type` and
- * `Content-Length` from the body metadata when available; `FormData` leaves
- * those headers to the runtime so multipart boundaries can be generated
- * correctly.
+ * `HttpClientRequest` is the request model shared by Effect HTTP clients and
+ * platform adapters. A request stores its method, URL, query parameters, hash,
+ * headers, and body as structured data. This module includes constructors,
+ * helpers for updating requests, body encoders for common payloads, and
+ * conversions to and from Web `Request` values.
  *
  * @since 4.0.0
  */
@@ -38,6 +28,7 @@ import * as Stream from "../../Stream.ts"
 import * as Headers from "./Headers.ts"
 import * as HttpBody from "./HttpBody.ts"
 import { hasBody, type HttpMethod } from "./HttpMethod.ts"
+import * as Url from "./Url.ts"
 import * as UrlParams from "./UrlParams.ts"
 
 const TypeId = "~effect/http/HttpClientRequest"
@@ -69,7 +60,7 @@ export interface HttpClientRequest extends Inspectable.Inspectable, Pipeable {
 /**
  * Options for constructing or modifying an `HttpClientRequest`.
  *
- * @category models
+ * @category options
  * @since 4.0.0
  */
 export interface Options {
@@ -92,7 +83,7 @@ export declare namespace Options {
   /**
    * Request options that omit the method and URL for helpers that already receive those values separately.
    *
-   * @category models
+   * @category options
    * @since 4.0.0
    */
   export interface NoUrl extends Omit<Options, "method" | "url"> {}
@@ -126,7 +117,7 @@ const Proto = {
 export function makeWith(
   method: HttpMethod,
   url: string,
-  urlParams: UrlParams.UrlParams,
+  urlParams: UrlParams.Input,
   hash: Option.Option<string>,
   headers: Headers.Headers,
   body: HttpBody.HttpBody
@@ -692,7 +683,16 @@ export const bodyJson: {
 )
 
 /**
- * Sets a JSON request body using unsafe JSON encoding, which may throw instead of failing in the Effect error channel.
+ * Sets a JSON request body using unsafe JSON encoding.
+ *
+ * **When to use**
+ *
+ * Use when the request body is known to be JSON-serializable and a synchronous
+ * `HttpClientRequest` result is needed.
+ *
+ * **Gotchas**
+ *
+ * JSON encoding may throw instead of failing in the Effect error channel.
  *
  * @category combinators
  * @since 4.0.0
@@ -708,7 +708,7 @@ export const bodyJsonUnsafe: {
  * @category combinators
  * @since 4.0.0
  */
-export const schemaBodyJson = <S extends Schema.Top>(
+export const schemaBodyJson = <S extends Schema.Constraint>(
   schema: S,
   options?: ParseOptions | undefined
 ): {
@@ -854,7 +854,7 @@ export const bodyFile: {
  * @since 4.0.0
  */
 export function toUrl(self: HttpClientRequest): Option.Option<URL> {
-  const r = UrlParams.makeUrl(self.url, self.urlParams, Option.getOrUndefined(self.hash))
+  const r = Url.make(self.url, self.urlParams, Option.getOrUndefined(self.hash))
   if (Result.isSuccess(r)) {
     return Option.some(r.success)
   }
@@ -896,7 +896,7 @@ const parseContentLength = (contentLength: string | null): number | undefined =>
 }
 
 /**
- * Converts an `HttpClientRequest` to a Web `Request` as a `Result`, failing when the request URL is invalid.
+ * Converts an `HttpClientRequest` safely to a Web `Request` as a `Result`, failing when the request URL is invalid.
  *
  * @category converting
  * @since 4.0.0
@@ -904,8 +904,8 @@ const parseContentLength = (contentLength: string | null): number | undefined =>
 export const toWebResult = (self: HttpClientRequest, options?: {
   readonly signal?: AbortSignal | undefined
   readonly context?: Context.Context<never> | undefined
-}): Result.Result<Request, UrlParams.UrlParamsError> => {
-  const url = UrlParams.makeUrl(self.url, self.urlParams, Option.getOrUndefined(self.hash))
+}): Result.Result<Request, Url.UrlError> => {
+  const url = Url.make(self.url, self.urlParams, Option.getOrUndefined(self.hash))
   if (Result.isFailure(url)) {
     return Result.fail(url.failure)
   }
@@ -945,7 +945,7 @@ export const toWebResult = (self: HttpClientRequest, options?: {
   }
   return Result.try({
     try: () => new Request(url.success, requestInit),
-    catch: (cause) => new UrlParams.UrlParamsError({ cause })
+    catch: (cause) => new Url.UrlError({ cause })
   })
 }
 
@@ -953,14 +953,14 @@ const isReadableStream = (u: unknown): u is ReadableStream<Uint8Array> =>
   typeof ReadableStream !== "undefined" && u instanceof ReadableStream
 
 /**
- * Converts an `HttpClientRequest` to a Web `Request`, failing with `UrlParamsError` when the request URL is invalid.
+ * Converts an `HttpClientRequest` to a Web `Request`, failing with `UrlError` when the request URL is invalid.
  *
  * @category converting
  * @since 4.0.0
  */
 export const toWeb = (self: HttpClientRequest, options?: {
   readonly signal?: AbortSignal | undefined
-}): Effect.Effect<Request, UrlParams.UrlParamsError> =>
+}): Effect.Effect<Request, Url.UrlError> =>
   Effect.contextWith((context) =>
     Effect.fromResult(toWebResult(self, {
       context: context,

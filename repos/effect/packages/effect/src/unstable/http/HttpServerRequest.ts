@@ -1,20 +1,12 @@
 /**
- * Utilities for working with the request visible to HTTP server handlers.
+ * Provides server-side access to the current incoming HTTP request.
  *
- * This module defines `HttpServerRequest`, the request-scoped context service
- * used by server effects, middleware, schema decoders, multipart parsers,
- * WebSocket upgrades, and conversions between Effect HTTP requests, client
- * requests, and Web `Request` values. Handlers commonly use it to inspect the
- * method, URL, headers, cookies, remote address, and body, or to decode those
- * parts with schemas instead of parsing raw values by hand.
- *
- * Body access is effectful because reading, parsing, schema decoding, or
- * multipart persistence can fail. Streaming request bodies may be single-use
- * depending on the underlying platform, while cached accessors such as text,
- * JSON, URL parameters, array buffers, and persisted multipart data reuse the
- * first read. Multipart persistence also requires `Scope`, `FileSystem`, and
- * `Path` services, and search parameter decoding depends on the
- * `ParsedSearchParams` service being provided by the router or adapter.
+ * `HttpServerRequest` is the context service used by handlers, middleware,
+ * schema decoders, multipart parsers, WebSocket upgrades, and adapters. A
+ * request stores its method, URL, original URL, headers, cookies, remote
+ * address, body stream, and platform source object. This module also includes
+ * request conversions and schema decoders for cookies, headers, search
+ * parameters, JSON, forms, URL-encoded bodies, and multipart bodies.
  *
  * @since 4.0.0
  */
@@ -45,7 +37,12 @@ import * as UrlParams from "./UrlParams.ts"
 
 export {
   /**
-   * Re-exports the `MaxBodySize` fiber reference for configuring request body limits.
+   * Provides the `MaxBodySize` fiber reference for configuring request body limits.
+   *
+   * **When to use**
+   *
+   * Use to configure the maximum body size accepted while reading server
+   * request bodies.
    *
    * @category fiber refs
    * @since 4.0.0
@@ -100,7 +97,12 @@ export interface HttpServerRequest extends HttpIncomingMessage.HttpIncomingMessa
 }
 
 /**
- * Service tag for the current `HttpServerRequest`.
+ * Service tag for the active server-side HTTP request.
+ *
+ * **When to use**
+ *
+ * Use to access the request currently being handled by HTTP server routes and
+ * middleware.
  *
  * @category context
  * @since 4.0.0
@@ -110,7 +112,12 @@ export const HttpServerRequest: Context.Service<HttpServerRequest, HttpServerReq
 )
 
 /**
- * Request-scoped service containing parsed search parameters.
+ * Service that contains decoded URL query parameters for the current request.
+ *
+ * **When to use**
+ *
+ * Use to access query parameters that have already been parsed for the current
+ * server request.
  *
  * **Details**
  *
@@ -184,8 +191,8 @@ export const upgradeChannel = <IE = never>(): Channel.Channel<
  * @category schemas
  * @since 4.0.0
  */
-export const schemaCookies = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaCookies = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, RD | HttpServerRequest> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -198,8 +205,8 @@ export const schemaCookies = <A, I extends Readonly<Record<string, string | unde
  * @category schemas
  * @since 4.0.0
  */
-export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaHeaders = <A, I extends Readonly<Record<string, string | undefined>>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -215,10 +222,9 @@ export const schemaHeaders = <A, I extends Readonly<Record<string, string | unde
 export const schemaSearchParams = <
   A,
   I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, Schema.SchemaError, ParsedSearchParams | RD> => {
   const parse = Schema.decodeUnknownEffect(schema)
@@ -235,8 +241,8 @@ export const schemaSearchParams = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyJson = <A, I, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyJson = <A, RD>(
+  schema: Schema.ConstraintDecoder<A, RD>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, HttpServerError | Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = HttpIncomingMessage.schemaBodyJson(schema, options)
@@ -258,12 +264,15 @@ const isMultipart = (request: HttpServerRequest) =>
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ) => {
   const parseMultipart = Multipart.schemaPersisted(schema)
-  const parseUrlParams = HttpIncomingMessage.schemaBodyUrlParams(schema as Schema.Codec<A, any, RD, RE>, options)
+  const parseUrlParams = HttpIncomingMessage.schemaBodyUrlParams(
+    schema as Schema.ConstraintCodec<A, any, RD, unknown>,
+    options
+  )
   return Effect.flatMap(HttpServerRequest, (request): Effect.Effect<
     A,
     Multipart.MultipartError | Schema.SchemaError | HttpServerError,
@@ -286,10 +295,9 @@ export const schemaBodyForm = <A, I extends Partial<Multipart.Persisted>, RD, RE
 export const schemaBodyUrlParams = <
   A,
   I extends Readonly<Record<string, string | ReadonlyArray<string> | undefined>>,
-  RD,
-  RE
+  RD
 >(
-  schema: Schema.Codec<A, I, RD, RE>,
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<A, HttpServerError | Schema.SchemaError, HttpServerRequest | RD> => {
   const parse = HttpIncomingMessage.schemaBodyUrlParams(schema, options)
@@ -308,8 +316,8 @@ export const schemaBodyUrlParams = <
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, RD>(
+  schema: Schema.ConstraintCodec<A, I, RD, unknown>,
   options?: ParseOptions | undefined
 ): Effect.Effect<
   A,
@@ -335,8 +343,8 @@ export const schemaBodyMultipart = <A, I extends Partial<Multipart.Persisted>, R
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyFormJson = <A, I, RD, RE>(
-  schema: Schema.Codec<A, I, RD, RE>,
+export const schemaBodyFormJson = <A, RD>(
+  schema: Schema.ConstraintDecoder<A, RD>,
   options?: ParseOptions | undefined
 ) => {
   const parseMultipart = Multipart.schemaJson(schema, options)
@@ -989,7 +997,7 @@ const isFormData = (u: unknown): u is FormData => typeof FormData !== "undefined
 const textDecoder = new TextDecoder()
 
 /**
- * Attempts to construct an absolute `URL` for a server request.
+ * Attempts to construct an absolute `URL` for a server request safely.
  *
  * **Details**
  *
@@ -1011,7 +1019,7 @@ export const toURL = (self: HttpServerRequest): Option.Option<URL> => {
 }
 
 /**
- * Converts an `HttpServerRequest` to a Web `Request` as a `Result`.
+ * Converts an `HttpServerRequest` safely to a Web `Request` as a `Result`.
  *
  * **Details**
  *
