@@ -1,27 +1,12 @@
 /**
- * The `CliError` module defines the structured error model used by the
- * unstable CLI parser and runner. It distinguishes command-line parse failures,
- * CLI definition problems, explicit help requests, and user handler failures so
- * applications can report errors consistently while still pattern matching on
- * the exact cause.
+ * Defines structured errors for the unstable CLI parser and runner.
  *
- * **Common tasks**
- *
- * - Detect CLI errors at runtime with {@link isCliError}
- * - Represent parse failures such as unknown flags, missing required inputs, or
- *   invalid argument values
- * - Attach parse or validation errors to {@link ShowHelp} when the runner should
- *   render help text together with the failure
- * - Preserve command handler failures with {@link UserError}
- *
- * **Gotchas**
- *
- * - {@link ShowHelp} is a control-flow error, not a parse failure; it exits with
- *   code `0` for explicit help and `1` when it carries errors
- * - Duplicate option names between parent and child commands are rejected
- *   because the parent command claims the flag before the child can see it
- * - Suggestion-bearing errors keep suggestions separate from the primary cause
- *   so help renderers can decide how much guidance to display
+ * CLI errors describe problems such as unknown or duplicate flags, missing
+ * flags or arguments, invalid values, unknown subcommands, user handler
+ * failures, and requests to show command help. This module includes the
+ * `CliError` union, the `isCliError` guard, schema-backed error classes with
+ * display messages, and the `NonShowHelpErrors` union used when parse or
+ * validation errors should be shown with help output.
  *
  * @since 4.0.0
  */
@@ -30,7 +15,7 @@ import * as Runtime from "../../Runtime.ts"
 import * as Schema from "../../Schema.ts"
 
 /**
- * @category type id
+ * @category type IDs
  * @since 4.0.0
  */
 const TypeId = "~effect/cli/CliError"
@@ -142,8 +127,9 @@ export type CliError =
  * @category models
  * @since 4.0.0
  */
-export class UnrecognizedOption extends Schema.ErrorClass<UnrecognizedOption>(`${TypeId}/UnrecognizedOption`)({
-  _tag: Schema.tag("UnrecognizedOption"),
+export class UnrecognizedOption extends Schema.TaggedErrorClass<UnrecognizedOption>(
+  `${TypeId}/UnrecognizedOption`
+)("UnrecognizedOption", {
   option: Schema.String,
   command: Schema.optional(Schema.Array(Schema.String)),
   suggestions: Schema.Array(Schema.String)
@@ -193,8 +179,9 @@ export class UnrecognizedOption extends Schema.ErrorClass<UnrecognizedOption>(`$
  * @category models
  * @since 4.0.0
  */
-export class DuplicateOption extends Schema.ErrorClass<DuplicateOption>(`${TypeId}/DuplicateOption`)({
-  _tag: Schema.tag("DuplicateOption"),
+export class DuplicateOption extends Schema.TaggedErrorClass<DuplicateOption>(
+  `${TypeId}/DuplicateOption`
+)("DuplicateOption", {
   option: Schema.String,
   parentCommand: Schema.String,
   childCommand: Schema.String
@@ -247,8 +234,9 @@ export class DuplicateOption extends Schema.ErrorClass<DuplicateOption>(`${TypeI
  * @category models
  * @since 4.0.0
  */
-export class MissingOption extends Schema.ErrorClass<MissingOption>(`${TypeId}/MissingOption`)({
-  _tag: Schema.tag("MissingOption"),
+export class MissingOption extends Schema.TaggedErrorClass<MissingOption>(
+  `${TypeId}/MissingOption`
+)("MissingOption", {
   option: Schema.String
 }) {
   /**
@@ -297,8 +285,9 @@ export class MissingOption extends Schema.ErrorClass<MissingOption>(`${TypeId}/M
  * @category models
  * @since 4.0.0
  */
-export class MissingArgument extends Schema.ErrorClass<MissingArgument>(`${TypeId}/MissingArgument`)({
-  _tag: Schema.tag("MissingArgument"),
+export class MissingArgument extends Schema.TaggedErrorClass<MissingArgument>(
+  `${TypeId}/MissingArgument`
+)("MissingArgument", {
   argument: Schema.String
 }) {
   /**
@@ -352,8 +341,9 @@ export class MissingArgument extends Schema.ErrorClass<MissingArgument>(`${TypeI
  * @category models
  * @since 4.0.0
  */
-export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/InvalidValue`)({
-  _tag: Schema.tag("InvalidValue"),
+export class InvalidValue extends Schema.TaggedErrorClass<InvalidValue>(
+  `${TypeId}/InvalidValue`
+)("InvalidValue", {
   option: Schema.String,
   value: Schema.String,
   expected: Schema.String,
@@ -374,6 +364,9 @@ export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/Inv
   override get message() {
     if (this.kind === "argument") {
       return `Invalid value for argument <${this.option}>: "${this.value}". Expected: ${this.expected}`
+    }
+    if (this.value.length === 0) {
+      return `Missing value for flag --${this.option}. Expected: ${this.expected}`
     }
     return `Invalid value for flag --${this.option}: "${this.value}". Expected: ${this.expected}`
   }
@@ -415,8 +408,9 @@ export class InvalidValue extends Schema.ErrorClass<InvalidValue>(`${TypeId}/Inv
  * @category models
  * @since 4.0.0
  */
-export class UnknownSubcommand extends Schema.ErrorClass<UnknownSubcommand>(`${TypeId}/UnknownSubcommand`)({
-  _tag: Schema.tag("UnknownSubcommand"),
+export class UnknownSubcommand extends Schema.TaggedErrorClass<UnknownSubcommand>(
+  `${TypeId}/UnknownSubcommand`
+)("UnknownSubcomand", {
   subcommand: Schema.String,
   parent: Schema.optional(Schema.Array(Schema.String)),
   suggestions: Schema.Array(Schema.String)
@@ -444,7 +438,7 @@ export class UnknownSubcommand extends Schema.ErrorClass<UnknownSubcommand>(`${T
 }
 
 /**
- * Wrapper for user (handler) errors to unify under CLI error channel when desired.
+ * Error wrapper for user handler failures in the CLI error channel.
  *
  * **Example** (Wrapping user errors)
  *
@@ -479,9 +473,10 @@ export class UnknownSubcommand extends Schema.ErrorClass<UnknownSubcommand>(`${T
  * @category models
  * @since 4.0.0
  */
-export class UserError extends Schema.ErrorClass<UserError>(`${TypeId}/UserError`)({
-  _tag: Schema.tag("UserError"),
-  cause: Schema.Defect
+export class UserError extends Schema.TaggedErrorClass<UserError>(
+  `${TypeId}/UserError`
+)("UserError", {
+  cause: Schema.Defect()
 }) {
   /**
    * Marks this value as a user handler error for runtime guards.
@@ -537,7 +532,7 @@ export const NonShowHelpErrors: Schema.Union<
 export type NonShowHelpErrors = typeof NonShowHelpErrors.Type
 
 /**
- * Control-flow value that asks the CLI runner to render help for a command path.
+ * Error data requesting CLI help rendering for a command path.
  *
  * **Details**
  *
@@ -548,8 +543,9 @@ export type NonShowHelpErrors = typeof NonShowHelpErrors.Type
  * @category models
  * @since 4.0.0
  */
-export class ShowHelp extends Schema.ErrorClass<ShowHelp>(`${TypeId}/ShowHelp`)({
-  _tag: Schema.tag("ShowHelp"),
+export class ShowHelp extends Schema.TaggedErrorClass<ShowHelp>(
+  `${TypeId}/ShowHelp`
+)("ShowHelp", {
   commandPath: Schema.Array(Schema.String),
   errors: Schema.Array(NonShowHelpErrors)
 }) {

@@ -1,37 +1,12 @@
 /**
- * Server-side support for running RPCs defined in an `RpcGroup`.
+ * Runs server-side handlers for RPC groups.
  *
- * This module connects typed RPC handlers to an encoded or already-decoded
- * transport, decodes client requests, invokes the matching handler, and sends
- * exits, stream chunks, defects, interrupts, and client-end notifications back
- * through the active server protocol. Use it to expose an RPC group through
- * `layerHttp`, standalone HTTP effects, websocket or socket servers, stdio,
- * worker runners, or a custom `Protocol`; use `makeNoSerialization` when the
- * surrounding system already owns message serialization.
- *
- * The `Protocol` service is the transport boundary. It declares how encoded
- * client messages are received and how encoded responses are written, plus
- * whether the transport supports stream acknowledgements, transferable
- * objects, and span propagation. HTTP request/response serving is useful for
- * simple calls and response streaming, but it does not provide client
- * acknowledgements or span propagation; websocket, socket, stdio, and worker
- * protocols keep a live channel and can participate in the streaming
- * acknowledgement lifecycle.
- *
- * **Handler gotchas**
- *
- * - Server handlers are looked up from `Rpc.ToHandler`, while RPC middleware
- *   is looked up from `Rpc.Middleware` and wraps the handler with metadata
- *   containing the `Rpc.ServerClient`, request id, headers, and decoded payload
- * - Payloads are decoded on the server and exits, stream chunks, and request
- *   defects are encoded on the server using the RPC schemas and the handler's
- *   schema services; encode failures are reported as request defects and the
- *   in-flight request is interrupted
- * - Streaming RPCs send chunks before the final exit, and transports with
- *   acknowledgement support wait for client acknowledgements between chunks to
- *   provide back pressure
- * - Fatal handler defects are sent as protocol defects by default; set
- *   `disableFatalDefects` when defects should remain ordinary request exits
+ * This module connects typed handlers for an `RpcGroup` to a server `Protocol`.
+ * It receives client messages, decodes request payloads, runs matching handlers
+ * and middleware, tracks in-flight requests, handles acknowledgements and
+ * interrupts, and sends responses back to clients. It also provides constructors
+ * and layers for decoded messages, HTTP, WebSocket, sockets, stdio, and worker
+ * runner protocols.
  *
  * @since 4.0.0
  */
@@ -92,7 +67,9 @@ import { withRun } from "./Utils.ts"
  * @since 4.0.0
  */
 export interface RpcServer<A extends Rpc.Any> {
-  readonly write: (clientId: number, message: FromClient<A>) => Effect.Effect<void>
+  readonly write: (clientId: number, message: FromClient<A>, options?: {
+    readonly onRequest?: (<A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>) | undefined
+  }) => Effect.Effect<void>
   readonly disconnect: (clientId: number) => Effect.Effect<void>
 }
 
@@ -189,7 +166,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
       return Effect.void
     })
 
-  const write = (clientId: number, message: FromClient<Rpcs>): Effect.Effect<void> =>
+  const write: RpcServer<Rpcs>["write"] = (clientId, message, opts) =>
     Effect.catchDefect(
       Effect.withFiber((requestFiber) => {
         if (isShutdown) return Effect.interrupt
@@ -209,7 +186,7 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
 
         switch (message._tag) {
           case "Request": {
-            return handleRequest(requestFiber, client, message)
+            return handleRequest(requestFiber, client, message, opts)
           }
           case "Ack": {
             const latch = client.latches.get(message.requestId)
@@ -256,7 +233,8 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
   const handleRequest = (
     requestFiber: Fiber.Fiber<any, any>,
     client: Client,
-    request: Request<Rpcs>
+    request: Request<Rpcs>,
+    opts: Parameters<RpcServer<Rpcs>["write"]>[2]
   ): Effect.Effect<void> => {
     if (client.fibers.has(request.id)) {
       return Effect.interrupt
@@ -337,6 +315,9 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any>(
       }
       return close ? Effect.ensuring(write, close) : write
     })
+    if (opts?.onRequest) {
+      effect = opts.onRequest(effect)
+    }
     if (enableTracing) {
       const parentSpan = requestFiber.context.mapUnsafe.get(
         Tracer.ParentSpan.key
@@ -562,7 +543,7 @@ export const make: <Rpcs extends Rpc.Any>(
             schemas.encodeDefect,
             schemas.collector,
             Effect.provideContext(schemas.encodeChunk(response.values), schemas.context),
-            (values) => ({ _tag: "Chunk", requestId: String(response.requestId), values })
+            (values) => ({ _tag: "Chunk", requestId: response.requestId, values })
           )
         }
         case "Exit": {
@@ -575,7 +556,7 @@ export const make: <Rpcs extends Rpc.Any>(
             schemas.encodeDefect,
             schemas.collector,
             Effect.provideContext(schemas.encodeExit(response.exit), schemas.context),
-            (exit) => ({ _tag: "Exit", requestId: String(response.requestId), exit })
+            (exit) => ({ _tag: "Exit", requestId: response.requestId, exit })
           )
         }
         case "Defect": {
@@ -672,7 +653,7 @@ export const make: <Rpcs extends Rpc.Any>(
       Effect.flatMap(encodeDefect(defect), (encodedDefect) =>
         send(client.id, {
           _tag: "Exit",
-          requestId: String(requestId),
+          requestId,
           exit: {
             _tag: "Failure",
             cause: [{
@@ -708,13 +689,9 @@ export const make: <Rpcs extends Rpc.Any>(
     switch (request._tag) {
       case "Request": {
         const tag = Predicate.hasProperty(request, "tag") ? (request.tag as string) : ""
-        const rpc = group.requests.get(tag)
-        if (!rpc) {
-          return sendDefect(client, `Unknown request tag: ${tag}`)
-        }
         let requestId: RequestId
         switch (typeof request.id) {
-          case "bigint":
+          case "number":
           case "string": {
             requestId = RequestId(request.id)
             break
@@ -722,6 +699,10 @@ export const make: <Rpcs extends Rpc.Any>(
           default: {
             return sendDefect(client, `Invalid request id: ${request.id}`)
           }
+        }
+        const rpc = group.requests.get(tag)
+        if (!rpc) {
+          return sendRequestDefect(client, requestId, (defect) => Effect.succeed(defect), `Unknown request tag: ${tag}`)
         }
         const schemas = getSchemas(rpc as any)
         return Effect.matchEffect(
@@ -810,7 +791,7 @@ export const layer = <Rpcs extends Rpc.Any>(
  * Defaults to using websockets for communication, but can be configured to use
  * HTTP.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerHttp = <Rpcs extends Rpc.Any>(options: {
@@ -840,11 +821,16 @@ export const layerHttp = <Rpcs extends Rpc.Any>(options: {
   )
 
 /**
- * Service interface for an RPC server transport, responsible for receiving
+ * Defines the service interface for an RPC server transport, responsible for receiving
  * encoded client messages, sending encoded responses, tracking clients, and
  * declaring transport capabilities.
  *
- * @category protocol
+ * **When to use**
+ *
+ * Use to provide the transport boundary for RPC servers over HTTP, WebSocket,
+ * workers, sockets, or custom protocols.
+ *
+ * @category protocols
  * @since 4.0.0
  */
 export class Protocol extends Context.Service<
@@ -879,7 +865,7 @@ export class Protocol extends Context.Service<
  * Creates a server `Protocol` backed by the current `SocketServer`, accepting
  * socket connections and routing decoded RPC messages.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolSocketServer = Effect.gen(function*() {
@@ -892,9 +878,9 @@ export const makeProtocolSocketServer = Effect.gen(function*() {
 })
 
 /**
- * A rpc protocol that uses `SocketServer` for communication.
+ * RPC protocol that uses `SocketServer` for communication.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerProtocolSocketServer: Layer.Layer<
@@ -907,7 +893,7 @@ export const layerProtocolSocketServer: Layer.Layer<
  * Creates a websocket server `Protocol` together with an HTTP effect that
  * upgrades the current request to a websocket and attaches it to the protocol.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolWithHttpEffectWebsocket: Effect.Effect<
@@ -942,7 +928,7 @@ export const makeProtocolWithHttpEffectWebsocket: Effect.Effect<
  * Creates a websocket server `Protocol` and registers its upgrade handler as a
  * GET route on the current `HttpRouter`.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolWebsocket: (options: {
@@ -959,9 +945,9 @@ export const makeProtocolWebsocket: (options: {
 })
 
 /**
- * A rpc protocol that uses websockets for communication.
+ * RPC protocol that uses WebSockets for communication.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerProtocolWebsocket = (options: {
@@ -979,7 +965,7 @@ export const layerProtocolWebsocket = (options: {
  * effect that decodes the current request and streams or returns encoded RPC
  * responses.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolWithHttpEffect: Effect.Effect<
@@ -1056,7 +1042,7 @@ export const makeProtocolWithHttpEffect: Effect.Effect<
       if (queue.state._tag === "Done") return Effect.void
       return Effect.forEach(
         requestIds,
-        (requestId) => writeRequest(id, { _tag: "Interrupt", requestId: String(requestId) }),
+        (requestId) => writeRequest(id, { _tag: "Interrupt", requestId }),
         { discard: true }
       )
     })
@@ -1146,7 +1132,7 @@ const mergeUint8Arrays = (arrays: ReadonlyArray<Uint8Array>) => {
  * Creates an HTTP server `Protocol` and registers its request handler as a POST
  * route on the current `HttpRouter`.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolHttp: (options: {
@@ -1166,7 +1152,7 @@ export const makeProtocolHttp: (options: {
  * Provides a server `Protocol` that uses HTTP POST requests for RPC
  * communication.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerProtocolHttp = (options: {
@@ -1261,7 +1247,7 @@ export const toHttpEffectWebsocket: <Rpcs extends Rpc.Any>(
  * Creates a server `Protocol` that reads RPC messages from `Stdio.stdin` and
  * writes encoded responses to `Stdio.stdout`.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolStdio = Effect.gen(function*() {
@@ -1322,7 +1308,7 @@ export const makeProtocolStdio = Effect.gen(function*() {
  * Provides a server `Protocol` that reads RPC messages from `Stdio.stdin` and
  * writes encoded responses to `Stdio.stdout`.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerProtocolStdio: Layer.Layer<
@@ -1335,7 +1321,7 @@ export const layerProtocolStdio: Layer.Layer<
  * Creates a server `Protocol` backed by `WorkerRunnerPlatform`, routing worker
  * messages to the RPC server and server responses back to workers.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const makeProtocolWorkerRunner: Effect.Effect<
@@ -1393,7 +1379,7 @@ export const makeProtocolWorkerRunner: Effect.Effect<
 /**
  * Provides a server `Protocol` backed by the current `WorkerRunnerPlatform`.
  *
- * @category protocol
+ * @category protocols
  * @since 4.0.0
  */
 export const layerProtocolWorkerRunner: Layer.Layer<

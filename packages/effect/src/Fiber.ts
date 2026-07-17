@@ -1,75 +1,9 @@
 /**
- * This module provides utilities for working with `Fiber`, the fundamental unit of
- * concurrency in Effect. Fibers are lightweight, user-space threads that allow
- * multiple Effects to run concurrently with structured concurrency guarantees.
- *
- * Key characteristics of Fibers:
- * - **Lightweight**: Much lighter than OS threads, you can create millions
- * - **Structured concurrency**: Parent fibers manage child fiber lifecycles
- * - **Cancellation safety**: Proper resource cleanup when interrupted
- * - **Cooperative**: Fibers yield control at effect boundaries
- * - **Traceable**: Each fiber has an ID for debugging and monitoring
- *
- * Common patterns:
- * - **Fork and join**: Start concurrent work and wait for results
- * - **Race conditions**: Run multiple effects, take the first to complete
- * - **Supervision**: Monitor and restart failed fibers
- * - **Resource management**: Ensure proper cleanup on interruption
- *
- * **Example** (Running effects in fibers)
- *
- * ```ts
- * import { Console, Effect, Fiber } from "effect"
- *
- * // Basic fiber operations
- * const basicExample = Effect.gen(function*() {
- *   // Fork an effect to run concurrently
- *   const fiber = yield* Effect.forkChild(
- *     Effect.gen(function*() {
- *       yield* Effect.sleep("2 seconds")
- *       yield* Console.log("Background task completed")
- *       return "background result"
- *     })
- *   )
- *
- *   // Do other work while the fiber runs
- *   yield* Console.log("Doing other work...")
- *   yield* Effect.sleep("1 second")
- *
- *   // Wait for the fiber to complete
- *   const result = yield* Fiber.join(fiber)
- *   yield* Console.log(`Fiber result: ${result}`)
- * })
- *
- * // Joining multiple fibers
- * const joinExample = Effect.gen(function*() {
- *   const task1 = Effect.delay(Effect.succeed("task1"), "1 second")
- *   const task2 = Effect.delay(Effect.succeed("task2"), "2 seconds")
- *
- *   // Start both effects as fibers
- *   const fiber1 = yield* Effect.forkChild(task1)
- *   const fiber2 = yield* Effect.forkChild(task2)
- *
- *   // Wait for both to complete
- *   const result1 = yield* Fiber.join(fiber1)
- *   const result2 = yield* Fiber.join(fiber2)
- *   return [result1, result2] // ["task1", "task2"]
- * })
- *
- * // Parallel execution with structured concurrency
- * const parallelExample = Effect.gen(function*() {
- *   const tasks = [1, 2, 3, 4, 5].map((n) =>
- *     Effect.gen(function*() {
- *       yield* Effect.sleep(`${n * 100} millis`)
- *       return n * n
- *     })
- *   )
- *
- *   // Run all tasks in parallel, wait for all to complete
- *   const results = yield* Effect.all(tasks, { concurrency: "unbounded" })
- *   return results // [1, 4, 9, 16, 25]
- * })
- * ```
+ * Operations for handles returned by forking effects. A `Fiber<A, E>` is a
+ * lightweight execution of an `Effect` that may still be running or may already
+ * have completed. This module lets callers await or join fiber results,
+ * interrupt one or many fibers, check unknown values, access the current fiber,
+ * and attach manually managed fibers to a `Scope` for cleanup.
  *
  * @since 2.0.0
  */
@@ -98,12 +32,12 @@ const TypeId = `~effect/Fiber/${version}`
  *
  * **When to use**
  *
- * Use `Fiber` values when you need to observe, join, interrupt, or otherwise
- * coordinate work that has already been forked.
+ * Use to observe, join, interrupt, or coordinate work that has already been
+ * forked.
  *
  * **Details**
  *
- * A fiber exposes both safe Effect-based operations, such as {@link await},
+ * A fiber exposes both safe Effect-based operations, such as {@link await_ await},
  * {@link join}, and {@link interrupt}, and low-level runtime fields used by
  * the scheduler and runtime internals.
  *
@@ -161,6 +95,10 @@ export interface Fiber<out A, out E = never> extends Pipeable {
  * The Fiber namespace contains utility types and functions for working with fibers.
  * It provides type-level utilities for fiber operations and variance encoding.
  *
+ * **When to use**
+ *
+ * Use to reference type-level helpers associated with `Fiber`.
+ *
  * **Details**
  *
  * The namespace currently exposes type-level support used by the `Fiber`
@@ -194,6 +132,11 @@ export declare namespace Fiber {
    * Variance encoding for the Fiber type, specifying covariance in both the
    * success type `A` and the error type `E`.
    *
+   * **When to use**
+   *
+   * Use to carry the success and error type parameters for `Fiber` in Effect's
+   * type machinery.
+   *
    * **Example** (Upcasting fibers safely)
    *
    * ```ts
@@ -220,7 +163,7 @@ export {
    *
    * **When to use**
    *
-   * Use `Fiber.await` when you need to inspect whether the fiber succeeded,
+   * Use when you need to inspect whether the fiber succeeded,
    * failed, died, or was interrupted without propagating the failure.
    *
    * **Details**
@@ -301,12 +244,12 @@ export const awaitAll: <A extends Fiber<any, any>>(
  *
  * **When to use**
  *
- * Use `Fiber.join` when the forked fiber is part of the current workflow and
- * its failure should fail the current Effect.
+ * Use when you need a forked fiber's failure to fail the current Effect because
+ * that fiber is part of the current workflow.
  *
  * **Gotchas**
  *
- * Joining a failed fiber propagates the fiber's Cause. Use {@link await} when
+ * Joining a failed fiber propagates the fiber's Cause. Use {@link await_ await} when
  * you need to inspect the `Exit` instead of failing.
  *
  * **Example** (Joining a fiber)
@@ -321,7 +264,7 @@ export const awaitAll: <A extends Fiber<any, any>>(
  * })
  * ```
  *
- * @see {@link await} for inspecting the fiber outcome as an Exit
+ * @see {@link await_ await} for inspecting the fiber outcome as an Exit
  *
  * @category combinators
  * @since 2.0.0
@@ -333,8 +276,8 @@ export const join: <A, E>(self: Fiber<A, E>) => Effect<A, E> = effect.fiberJoin
  *
  * **When to use**
  *
- * Use when every fiber must succeed and you want the successful values rather
- * than the `Exit` values.
+ * Use when you need every fiber to succeed and want the successful values
+ * rather than the `Exit` values.
  *
  * **Details**
  *
@@ -368,7 +311,8 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
  *
  * **When to use**
  *
- * Use when a forked fiber is no longer needed and should be cancelled.
+ * Use when you need to cancel a forked fiber and wait for its cleanup to
+ * complete.
  *
  * **Details**
  *
@@ -394,7 +338,7 @@ export const joinAll: <A extends Iterable<Fiber<any, any>>>(
  * ```
  *
  * @see {@link interruptAs} for specifying the interrupting fiber ID
- * @see {@link await} for observing the interrupted fiber's Exit
+ * @see {@link await_ await} for observing the interrupted fiber's Exit
  *
  * @category interruption
  * @since 2.0.0
@@ -458,7 +402,8 @@ export const interruptAs: {
  *
  * **When to use**
  *
- * Use when a group of forked fibers is no longer needed.
+ * Use when you need to cancel several forked fibers and wait for their cleanup
+ * to complete.
  *
  * **Details**
  *
@@ -523,6 +468,11 @@ export const interruptAll: <A extends Iterable<Fiber<any, any>>>(
  * interrupting fiber. This allows you to control which fiber is considered the source
  * of the interruption, which can be useful for debugging and tracing.
  *
+ * **When to use**
+ *
+ * Use to interrupt several fibers while recording a specific fiber ID as the
+ * interruptor.
+ *
  * **Details**
  *
  * The returned Effect completes only after all interrupted fibers have
@@ -578,12 +528,13 @@ export const interruptAllAs: {
 } = effect.fiberInterruptAllAs
 
 /**
- * Tests if a value is a Fiber. This is a type guard that can be used to
+ * Checks whether a value is a Fiber. This is a type guard that can be used to
  * determine if an unknown value is a Fiber instance.
  *
  * **When to use**
  *
- * Use at boundaries where an unknown value may be a runtime fiber.
+ * Use when checking values at boundaries where an unknown value may be a
+ * runtime fiber.
  *
  * **Details**
  *
@@ -627,7 +578,7 @@ export const isFiber = (
  *
  * **When to use**
  *
- * Use for low-level runtime integrations that need access to the currently
+ * Use when you need low-level runtime integrations that need access to the currently
  * executing fiber.
  *
  * **Gotchas**
@@ -654,7 +605,7 @@ export const isFiber = (
 export const getCurrent: () => Fiber<any, any> | undefined = effect.getCurrentFiber
 
 /**
- * Links a fiber to a `Scope` and returns the same fiber.
+ * Adds a fiber to a `Scope` and returns the same fiber.
  *
  * **When to use**
  *

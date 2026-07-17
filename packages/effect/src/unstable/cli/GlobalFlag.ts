@@ -1,26 +1,12 @@
 /**
- * The `GlobalFlag` module defines flags that are available to every command in
- * an Effect CLI application. Global flags are useful for cross-cutting command
- * line behavior such as printing help, showing the application version,
- * generating shell completions, or configuring shared handler settings like the
- * minimum log level.
+ * Global flags for Effect CLI command trees. Global flags are parsed outside a
+ * single command's local flags and can apply to a command and its descendants.
  *
- * **Common tasks**
- *
- * - Create an action flag with {@link action} for side effects that should run
- *   before the selected command, such as `--help` or `--version`
- * - Create a setting flag with {@link setting} for values that should be made
- *   available to command handlers through the Effect context
- * - Reuse the built-in {@link Help}, {@link Version}, {@link Completions}, and
- *   {@link LogLevel} flags when constructing command runners
- *
- * **Gotchas**
- *
- * - Action flags are intended to perform their effect and exit instead of
- *   continuing into the command handler
- * - Setting flags allocate a distinct context service for each call to
- *   {@link setting}, so reuse exported settings when handlers need to read the
- *   same parsed global value
+ * This module defines two kinds of global flags: action flags, which run an
+ * effect and stop normal command execution, and setting flags, which provide a
+ * parsed value to the command handler through the Effect context. It also
+ * defines the built-in help, version, wizard, shell-completion, and log-level flags
+ * used by `Command.run` and `Command.runWith`.
  *
  * @since 4.0.0
  */
@@ -51,6 +37,7 @@ export interface HandlerContext {
   readonly command: Command.Command.Any
   readonly commandPath: ReadonlyArray<string>
   readonly version: string
+  readonly builtIns: ReadonlyArray<BuiltIn>
 }
 
 /**
@@ -156,8 +143,11 @@ let settingIdCounter = 0
 /* ========================================================================== */
 
 /**
- * The `--help` / `-h` global flag.
- * Shows help documentation for the command.
+ * Defines the `--help` / `-h` global flag, which shows help documentation for the
+ * active command path.
+ *
+ * @see {@link BuiltIns} for the default list containing this flag
+ * @see {@link action} for defining custom action global flags
  *
  * @category references
  * @since 4.0.0
@@ -167,35 +157,60 @@ export const Help: Action<boolean> = action({
     Flag.withAlias("h"),
     Flag.withDescription("Show help information")
   ),
-  run: (_, { command, commandPath }) =>
-    Effect.gen(function*() {
-      const formatter = yield* CliOutput.Formatter
-      const helpDoc = yield* HelpInternal.getHelpForCommandPath(command, commandPath, BuiltIns)
-      yield* Console.log(formatter.formatHelpDoc(helpDoc))
-    })
+  run: Effect.fnUntraced(function*(_, { builtIns, command, commandPath }) {
+    const formatter = yield* CliOutput.Formatter
+    const helpDoc = yield* HelpInternal.getHelpForCommandPath(command, commandPath, builtIns)
+    yield* Console.log(formatter.formatHelpDoc(helpDoc))
+  })
 })
 
 /**
- * The `--version` global flag.
- * Shows version information for the command.
+ * Defines the global action flag for showing command version information.
+ *
+ * **When to use**
+ *
+ * Use to add a built-in `--version / -v` flag to a command runner.
  *
  * @category references
  * @since 4.0.0
  */
 export const Version: Action<boolean> = action({
   flag: Flag.boolean("version").pipe(
+    Flag.withAlias("v"),
     Flag.withDescription("Show version information")
   ),
-  run: (_, { command, version }) =>
-    Effect.gen(function*() {
-      const formatter = yield* CliOutput.Formatter
-      yield* Console.log(formatter.formatVersion(command.name, version))
-    })
+  run: Effect.fnUntraced(function*(_, { command, version }) {
+    const formatter = yield* CliOutput.Formatter
+    yield* Console.log(formatter.formatVersion(command.name, version))
+  })
 })
 
 /**
- * The `--completions` global flag.
- * Prints shell completion script for the given shell.
+ * Defines the global action flag for starting interactive wizard mode.
+ *
+ * **Details**
+ *
+ * `Command.run` and `Command.runWith` handle this action specially so the
+ * generated arguments can be passed back through the command parser.
+ *
+ * @category references
+ * @since 4.0.0
+ */
+export const Wizard: Action<boolean> = action({
+  flag: Flag.boolean("wizard").pipe(
+    Flag.withDescription("Start wizard mode for a command")
+  ),
+  run: () => Effect.void
+})
+
+/**
+ * Defines the `--completions` global flag, which prints a shell completion script for
+ * the given shell.
+ *
+ * **Details**
+ *
+ * Accepted values are `bash`, `zsh`, `fish`, and `sh`; `sh` is normalized to
+ * `bash`.
  *
  * @category references
  * @since 4.0.0
@@ -205,21 +220,25 @@ export const Completions: Action<Option.Option<"bash" | "zsh" | "fish">> = actio
     .pipe(
       Flag.optional,
       Flag.map((v) => Option.map(v, (s) => s === "sh" ? "bash" : s)),
+      Flag.withMetavar("<bash|zsh|fish|sh>"),
       Flag.withDescription("Print shell completion script")
     ),
-  run: (shell, { command }) =>
-    Effect.gen(function*() {
-      if (Option.isNone(shell)) return
-      const descriptor = CommandDescriptor.fromCommand(command)
-      yield* Console.log(
-        Completions_.generate(command.name, shell.value, descriptor)
-      )
-    })
+  run: Effect.fnUntraced(function*(shell, { command }) {
+    if (Option.isNone(shell)) return
+    const descriptor = CommandDescriptor.fromCommand(command)
+    yield* Console.log(
+      Completions_.generate(command.name, shell.value, descriptor)
+    )
+  })
 })
 
 /**
- * The `--log-level` global flag.
- * Sets the minimum log level for the command.
+ * Defines the global setting flag for command log level.
+ *
+ * **When to use**
+ *
+ * Use to add a built-in `--log-level` option that configures the minimum log
+ * level for the command.
  *
  * @category references
  * @since 4.0.0
@@ -240,7 +259,8 @@ export const LogLevel: Setting<"log-level", Option.Option<LogLevelType>> = setti
     ] as const
   ).pipe(
     Flag.optional,
-    Flag.withDescription("Sets the minimum log level")
+    Flag.withDescription("Sets the minimum log level"),
+    Flag.withMetavar("<all|trace|debug|info|warn|warning|error|fatal|none>")
   )
 })
 
@@ -251,20 +271,42 @@ export const LogLevel: Setting<"log-level", Option.Option<LogLevelType>> = setti
 /**
  * Built-in global flags in default precedence order.
  *
+ * **When to use**
+ *
+ * Use when extending or inspecting the default global-flag set that
+ * `Command.runWith` prepends before user-defined global flags.
+ *
+ * **Details**
+ *
+ * The built-ins are `Help`, `Version`, `Wizard`, `Completions`, and `LogLevel`.
+ * `Command.runWith` prepends these built-ins when collecting and parsing global
+ * flags.
+ *
+ * **Gotchas**
+ *
+ * Action flags are processed in active flag order and the first present action
+ * exits, so this array controls built-in action precedence.
+ *
+ * @see {@link Help} for the help action flag
+ * @see {@link Version} for the version action flag
+ * @see {@link Completions} for the shell-completions action flag
+ * @see {@link LogLevel} for the built-in log-level setting flag
+ *
  * @category references
  * @since 4.0.0
  */
-export const BuiltIns: ReadonlyArray<GlobalFlag<any>> = [
-  Help,
-  Version,
-  Completions,
-  LogLevel
-]
+export const BuiltIns: readonly [
+  Action<boolean>,
+  Action<boolean>,
+  Action<boolean>,
+  Action<Option.Option<"bash" | "zsh" | "fish">>,
+  Setting<"log-level", Option.Option<LogLevelType>>
+] = [Help, Version, Wizard, Completions, LogLevel]
 
 /**
- * Built-in setting context identifiers.
+ * Global flag included in the default command-runner configuration.
  *
  * @category models
  * @since 4.0.0
  */
-export type BuiltInSettingContext = Setting.Identifier<"log-level">
+export type BuiltIn = typeof BuiltIns[number]

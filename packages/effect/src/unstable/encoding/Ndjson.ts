@@ -1,19 +1,9 @@
 /**
- * Utilities for encoding Effect channel payloads and schema values as
- * newline-delimited JSON.
+ * Encodes and decodes newline-delimited JSON streams in Effect channels.
  *
- * NDJSON represents a stream as one complete JSON value per line, making this
- * module useful for log pipelines, long-lived HTTP responses, socket protocols,
- * and file formats where records should be processed incrementally instead of
- * buffering a whole JSON array. Use the byte helpers at transport boundaries
- * that speak UTF-8, the string helpers when text framing is already handled,
- * and the schema-aware helpers when each record should be validated or
- * transformed at the boundary.
- *
- * Encoders append a trailing newline after each emitted chunk, and decoders
- * tolerate records split across input chunks. Empty lines are only skipped when
- * `ignoreEmptyLines` is enabled; otherwise they are passed to `JSON.parse` and
- * fail like any other invalid JSON record.
+ * NDJSON stores one complete JSON value on each line. This module has helpers
+ * for byte streams, string streams, and schema-checked records, so streaming
+ * code can read or write one JSON record at a time.
  *
  * @since 4.0.0
  */
@@ -116,7 +106,7 @@ export const encode = <IE = never, Done = unknown>(): Channel.Channel<
  * @category constructors
  * @since 4.0.0
  */
-export const encodeSchema = <S extends Schema.Top>(
+export const encodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -140,7 +130,7 @@ export const encodeSchema = <S extends Schema.Top>(
  * @category constructors
  * @since 4.0.0
  */
-export const encodeSchemaString = <S extends Schema.Top>(
+export const encodeSchemaString = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -155,6 +145,11 @@ export const encodeSchemaString = <S extends Schema.Top>(
 
 /**
  * Creates a channel that parses NDJSON string chunks into values.
+ *
+ * **When to use**
+ *
+ * Use when NDJSON input arrives as string chunks and each complete line should
+ * be parsed into a JSON value.
  *
  * **Details**
  *
@@ -227,7 +222,7 @@ export const decode = <IE = never, Done = unknown>(options?: {
  * @category constructors
  * @since 4.0.0
  */
-export const decodeSchema = <S extends Schema.Top>(
+export const decodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(options?: {
@@ -253,7 +248,7 @@ export const decodeSchema = <S extends Schema.Top>(
  * @category constructors
  * @since 4.0.0
  */
-export const decodeSchemaString = <S extends Schema.Top>(
+export const decodeSchemaString = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(options?: {
@@ -445,7 +440,7 @@ export const duplexString: {
  * @since 4.0.0
  */
 export const duplexSchema: {
-  <In extends Schema.Top, Out extends Schema.Top>(
+  <In extends Schema.Constraint, Out extends Schema.Constraint>(
     options: {
       readonly inputSchema: In
       readonly outputSchema: Out
@@ -470,7 +465,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-  <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+  <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
     self: Channel.Channel<
       Arr.NonEmptyReadonlyArray<Uint8Array>,
       OutErr,
@@ -494,7 +489,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-} = dual(2, <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+} = dual(2, <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
   self: Channel.Channel<
     Arr.NonEmptyReadonlyArray<Uint8Array>,
     OutErr,
@@ -532,7 +527,7 @@ export const duplexSchema: {
  * @since 4.0.0
  */
 export const duplexSchemaString: {
-  <In extends Schema.Top, Out extends Schema.Top>(
+  <In extends Schema.Constraint, Out extends Schema.Constraint>(
     options: {
       readonly inputSchema: In
       readonly outputSchema: Out
@@ -557,7 +552,7 @@ export const duplexSchemaString: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-  <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+  <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
     self: Channel.Channel<
       Arr.NonEmptyReadonlyArray<string>,
       OutErr,
@@ -581,7 +576,7 @@ export const duplexSchemaString: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-} = dual(2, <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+} = dual(2, <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
   self: Channel.Channel<
     Arr.NonEmptyReadonlyArray<string>,
     OutErr,

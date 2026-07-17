@@ -1,40 +1,25 @@
 /**
- * The `Tool` module provides functionality for defining and managing tools
- * that language models can call to augment their capabilities.
+ * Definitions and helpers for tools that AI models can request during a
+ * workflow.
  *
- * This module enables creation of both user-defined and provider-defined tools,
- * with full schema validation, type safety, and handler support. Tools allow
- * AI models to perform actions like searching databases, calling APIs, or
- * executing code within your application context.
- *
- * **Example** (Defining a calculator tool)
- *
- * ```ts
- * import { Schema } from "effect"
- * import { Tool } from "effect/unstable/ai"
- *
- * // Define a simple calculator tool
- * const Calculator = Tool.make("Calculator", {
- *   description: "Performs basic arithmetic operations",
- *   parameters: Schema.Struct({
- *     operation: Schema.Literals(["add", "subtract", "multiply", "divide"]),
- *     a: Schema.Number,
- *     b: Schema.Number
- *   }),
- *   success: Schema.Number
- * })
- * ```
+ * A tool names an operation, describes the parameters it accepts, declares
+ * successful and failed results, and can require approval before execution.
+ * This module supports tools defined by the application, tools built into a
+ * provider, and dynamic tools whose schema is known only at runtime. It also
+ * includes the shared types and conversion helpers needed by language-model
+ * requests, tool handlers, and provider integrations.
  *
  * @since 4.0.0
  */
 import * as Context from "../../Context.ts"
 import type * as Effect from "../../Effect.ts"
 import { constFalse, constTrue, identity } from "../../Function.ts"
+import * as StackTraceLimit from "../../internal/stackTraceLimit.ts"
 import type * as JsonSchema from "../../JsonSchema.ts"
 import { pipeArguments } from "../../Pipeable.ts"
 import * as Predicate from "../../Predicate.ts"
 import * as Schema from "../../Schema.ts"
-import * as AST from "../../SchemaAST.ts"
+import * as SchemaAST from "../../SchemaAST.ts"
 import type * as Struct from "../../Struct.ts"
 import type * as Types from "../../Types.ts"
 import type * as AiError from "./AiError.ts"
@@ -154,7 +139,7 @@ export interface NeedsApprovalContext {
  * @category models
  * @since 4.0.0
  */
-export type NeedsApprovalFunction<Params extends Schema.Top> = (
+export type NeedsApprovalFunction<Params extends Schema.Constraint> = (
   params: Params["Type"],
   context: NeedsApprovalContext
 ) => boolean | Effect.Effect<boolean>
@@ -171,7 +156,7 @@ export type NeedsApprovalFunction<Params extends Schema.Top> = (
  * @category models
  * @since 4.0.0
  */
-export type NeedsApproval<Params extends Schema.Top> =
+export type NeedsApproval<Params extends Schema.Constraint> =
   | boolean
   | NeedsApprovalFunction<Params>
 
@@ -211,9 +196,9 @@ export type NeedsApproval<Params extends Schema.Top> =
 export interface Tool<
   out Name extends string,
   out Config extends {
-    readonly parameters: Schema.Top
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly parameters: Schema.Constraint
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out Requirements = never
@@ -305,7 +290,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the result of a tool call when successful.
    */
-  setSuccess<SuccessSchema extends Schema.Top>(
+  setSuccess<SuccessSchema extends Schema.Constraint>(
     schema: SuccessSchema
   ): Tool<
     Name,
@@ -321,7 +306,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the result of a tool call when it fails.
    */
-  setFailure<FailureSchema extends Schema.Top>(
+  setFailure<FailureSchema extends Schema.Constraint>(
     schema: FailureSchema
   ): Tool<
     Name,
@@ -337,7 +322,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the parameters of a tool call.
    */
-  setParameters<ParametersSchema extends Schema.Top>(
+  setParameters<ParametersSchema extends Schema.Constraint>(
     schema: ParametersSchema
   ): Tool<
     Name,
@@ -402,10 +387,10 @@ export interface ProviderDefined<
   out Identifier extends `${string}.${string}`,
   out Name extends string,
   out Config extends {
-    readonly args: Schema.Top
-    readonly parameters: Schema.Top
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly args: Schema.Constraint
+    readonly parameters: Schema.Constraint
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out RequiresHandler extends boolean = false
@@ -496,9 +481,9 @@ export interface ProviderDefined<
 export interface Dynamic<
   out Name extends string,
   out Config extends {
-    readonly parameters: Schema.Top | JsonSchema.JsonSchema
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly parameters: Schema.Constraint | JsonSchema.JsonSchema
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out Requirements = never
@@ -506,7 +491,7 @@ export interface Dynamic<
   Tool<
     Name,
     {
-      readonly parameters: Config["parameters"] extends Schema.Top ? Config["parameters"] : typeof Schema.Unknown
+      readonly parameters: Config["parameters"] extends Schema.Constraint ? Config["parameters"] : typeof Schema.Unknown
       readonly success: Config["success"]
       readonly failure: Config["failure"]
       readonly failureMode: Config["failureMode"]
@@ -520,7 +505,7 @@ export interface Dynamic<
    * The raw JSON Schema for parameters. Present when `parameters` was provided
    * as a JSON Schema, `undefined` when an Effect Schema was used.
    */
-  readonly jsonSchema: Config["parameters"] extends Schema.Top ? undefined : JsonSchema.JsonSchema
+  readonly jsonSchema: Config["parameters"] extends Schema.Constraint ? undefined : JsonSchema.JsonSchema
 }
 
 // =============================================================================
@@ -1043,37 +1028,34 @@ export type RequiresHandler<Tool extends Any> = Tool extends ProviderDefined<
 // Constructors
 // =============================================================================
 
+// Clones a tool while preserving its prototype (and thus its kind, e.g.
+// user-defined vs. provider-defined vs. dynamic) and its own properties such
+// as `id`. Optional `overrides` replace individual fields on the clone.
+const clone = (self: Any, overrides?: Record<string, unknown>): any =>
+  Object.assign(Object.create(Object.getPrototypeOf(self)), self, overrides)
+
 const Proto = {
   [TypeId]: { _Requirements: identity },
   pipe() {
     return pipeArguments(this, arguments)
   },
   addDependency(this: Any) {
-    return userDefinedProto({ ...this })
+    return clone(this)
   },
-  setParameters(this: Any, parametersSchema: Schema.Top) {
-    return userDefinedProto({
-      ...this,
-      parametersSchema
-    })
+  setParameters(this: Any, parametersSchema: Schema.Constraint) {
+    return clone(this, { parametersSchema })
   },
-  setSuccess(this: Any, successSchema: Schema.Top) {
-    return userDefinedProto({ ...this, successSchema })
+  setSuccess(this: Any, successSchema: Schema.Constraint) {
+    return clone(this, { successSchema })
   },
-  setFailure(this: Any, failureSchema: Schema.Top) {
-    return userDefinedProto({ ...this, failureSchema })
+  setFailure(this: Any, failureSchema: Schema.Constraint) {
+    return clone(this, { failureSchema })
   },
   annotate<I, S>(this: Any, tag: Context.Key<I, S>, value: S) {
-    return userDefinedProto({
-      ...this,
-      annotations: Context.add(this.annotations, tag, value)
-    })
+    return clone(this, { annotations: Context.add(this.annotations, tag, value) })
   },
   annotateMerge<I>(this: Any, context: Context.Context<I>) {
-    return userDefinedProto({
-      ...this,
-      annotations: Context.merge(this.annotations, context)
-    })
+    return clone(this, { annotations: Context.merge(this.annotations, context) })
   }
 }
 
@@ -1089,9 +1071,9 @@ const DynamicProto = {
 
 const userDefinedProto = <
   const Name extends string,
-  Parameters extends Schema.Top,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Parameters extends Schema.Constraint,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   Mode extends FailureMode
 >(options: {
   readonly name: Name
@@ -1119,10 +1101,10 @@ const userDefinedProto = <
 const providerDefinedProto = <
   const Identifier extends `${string}.${string}`,
   const Name extends string,
-  Args extends Schema.Top,
-  Parameters extends Schema.Top,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Args extends Schema.Constraint,
+  Parameters extends Schema.Constraint,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   RequiresHandler extends boolean,
   Mode extends FailureMode
 >(options: {
@@ -1147,13 +1129,13 @@ const providerDefinedProto = <
     readonly failureMode: Mode
   },
   RequiresHandler
-> => Object.assign(Object.create(ProviderDefinedProto), { ...options })
+> => Object.assign(Object.create(ProviderDefinedProto), { annotations: Context.empty(), ...options })
 
 const dynamicProto = <
   const Name extends string,
-  Parameters extends Schema.Top | JsonSchema.JsonSchema,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Parameters extends Schema.Constraint | JsonSchema.JsonSchema,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   Mode extends FailureMode
 >(options: {
   readonly name: Name
@@ -1209,9 +1191,9 @@ const dynamicProto = <
  */
 export const make = <
   const Name extends string,
-  Parameters extends Schema.Top = typeof EmptyParams,
-  Success extends Schema.Top = typeof Schema.Void,
-  Failure extends Schema.Top = typeof Schema.Never,
+  Parameters extends Schema.Constraint = typeof EmptyParams,
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Failure extends Schema.Constraint = typeof Schema.Never,
   Mode extends FailureMode | undefined = undefined,
   Dependencies extends Array<Context.Key<any, any> | Context.Key<never, any>> = []
 >(name: Name, options?: {
@@ -1289,8 +1271,8 @@ export const make = <
  *
  * **When to use**
  *
- * This is useful for tools where the schema isn't known at compile time,
- * such as MCP tools discovered at runtime or tools from external configurations.
+ * Use when you do not know a tool schema at compile time, such as MCP tools
+ * discovered at runtime or tools from external configurations.
  *
  * **Details**
  *
@@ -1332,9 +1314,9 @@ export const dynamic: {
     const Name extends string,
     const Options extends {
       readonly description?: string | undefined
-      readonly parameters?: Schema.Top | JsonSchema.JsonSchema | undefined
-      readonly success?: Schema.Top | undefined
-      readonly failure?: Schema.Top | undefined
+      readonly parameters?: Schema.Constraint | JsonSchema.JsonSchema | undefined
+      readonly success?: Schema.Constraint | undefined
+      readonly failure?: Schema.Constraint | undefined
       readonly failureMode?: FailureMode | undefined
       readonly needsApproval?: NeedsApproval<any> | undefined
     }
@@ -1344,12 +1326,14 @@ export const dynamic: {
   ): Dynamic<
     Name,
     {
-      readonly parameters: Options extends { readonly parameters: infer P } ? P extends Schema.Top ? P
+      readonly parameters: Options extends { readonly parameters: infer P } ? P extends Schema.Constraint ? P
         : P extends JsonSchema.JsonSchema ? P
         : typeof Schema.Unknown
         : typeof Schema.Unknown
-      readonly success: Options extends { readonly success: infer S extends Schema.Top } ? S : typeof Schema.Unknown
-      readonly failure: Options extends { readonly failure: infer F extends Schema.Top } ? F : typeof Schema.Never
+      readonly success: Options extends { readonly success: infer S extends Schema.Constraint } ? S
+        : typeof Schema.Unknown
+      readonly failure: Options extends { readonly failure: infer F extends Schema.Constraint } ? F
+        : typeof Schema.Never
       readonly failureMode: Options extends { readonly failureMode: infer M extends FailureMode } ? M : "error"
     }
   >
@@ -1357,9 +1341,9 @@ export const dynamic: {
   const Name extends string,
   const Options extends {
     readonly description?: string | undefined
-    readonly parameters?: Schema.Top | JsonSchema.JsonSchema | undefined
-    readonly success?: Schema.Top | undefined
-    readonly failure?: Schema.Top | undefined
+    readonly parameters?: Schema.Constraint | JsonSchema.JsonSchema | undefined
+    readonly success?: Schema.Constraint | undefined
+    readonly failure?: Schema.Constraint | undefined
     readonly failureMode?: FailureMode | undefined
     readonly needsApproval?: NeedsApproval<any> | undefined
   }
@@ -1423,10 +1407,10 @@ export const dynamic: {
 export const providerDefined = <
   const Identifier extends `${string}.${string}`,
   const Name extends string,
-  Args extends Schema.Top = typeof Schema.Void,
-  Parameters extends Schema.Top = typeof Schema.Void,
-  Success extends Schema.Top = typeof Schema.Void,
-  Failure extends Schema.Top = typeof Schema.Never,
+  Args extends Schema.Constraint = typeof Schema.Void,
+  Parameters extends Schema.Constraint = typeof Schema.Void,
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Failure extends Schema.Constraint = typeof Schema.Never,
   RequiresHandler extends boolean = false
 >(options: {
   /**
@@ -1515,8 +1499,8 @@ export const providerDefined = <
 // =============================================================================
 
 /**
- * A utility which allows mapping between a provider-defined name for a tool
- * and the name given to the tool by the Effect AI SDK.
+ * Maps between a provider-defined tool name and the name given to the tool by
+ * the Effect AI SDK.
  *
  * **Details**
  *
@@ -1525,7 +1509,7 @@ export const providerDefined = <
  * naming conflicts (i.e. `"web_search"`) to instead use custom names (i.e.
  * `"OpenAiWebSearch"`).
  *
- * @category utils
+ * @category models
  * @since 4.0.0
  */
 export class NameMapper<Tools extends ReadonlyArray<Any>> {
@@ -1603,7 +1587,7 @@ export class NameMapper<Tools extends ReadonlyArray<Any>> {
  * console.log(description) // "This is an example tool"
  * ```
  *
- * @category utils
+ * @category getters
  * @since 4.0.0
  */
 export const getDescription = <Tool extends Any>(tool: Tool): string | undefined => {
@@ -1611,7 +1595,7 @@ export const getDescription = <Tool extends Any>(tool: Tool): string | undefined
     return tool.description
   }
   if (Schema.isSchema(tool.parametersSchema)) {
-    return AST.resolveDescription(tool.parametersSchema.ast)
+    return SchemaAST.resolveDescription(tool.parametersSchema.ast)
   }
   return undefined
 }
@@ -1654,7 +1638,7 @@ export const getDescription = <Tool extends Any>(tool: Tool): string | undefined
  * // }
  * ```
  *
- * @category utils
+ * @category getters
  * @since 4.0.0
  */
 export const getJsonSchema = <Tool extends Any>(tool: Tool, options?: {
@@ -1676,10 +1660,10 @@ export const getJsonSchema = <Tool extends Any>(tool: Tool, options?: {
  * `Schema.toJsonSchemaDocument` and any generated definitions are attached as
  * `$defs`.
  *
- * @category utils
+ * @category converting
  * @since 4.0.0
  */
-export const getJsonSchemaFromSchema = <S extends Schema.Top>(schema: S, options?: {
+export const getJsonSchemaFromSchema = <S extends Schema.Constraint>(schema: S, options?: {
   readonly transformer?: CodecTransformer
 }): JsonSchema.JsonSchema => {
   if (Predicate.isNotUndefined(options?.transformer)) {
@@ -1860,7 +1844,19 @@ export const Strict = Context.Reference<boolean | undefined>("effect/ai/Tool/Str
 /**
  * Returns the strict mode setting for a tool, or `undefined` if not set.
  *
- * @category utils
+ * **When to use**
+ *
+ * Use to inspect the per-tool strict JSON Schema override attached through
+ * `Tool.Strict`.
+ *
+ * **Gotchas**
+ *
+ * `undefined` means no per-tool override is set. It is distinct from `false`;
+ * provider or global configuration determines the final behavior.
+ *
+ * @see {@link Strict} for the annotation read by this helper
+ *
+ * @category getters
  * @since 4.0.0
  */
 export const getStrictMode = <T extends Any>(tool: T): boolean | undefined => Context.get(tool.annotations, Strict)
@@ -1942,20 +1938,30 @@ function filter(obj: any) {
 }
 
 /**
- * **Unsafe**: This function will throw an error if an insecure property is
- * found in the parsed JSON or if the provided JSON text is not parseable.
+ * Parses JSON text while rejecting prototype-pollution keys.
  *
- * @category utils
+ * **When to use**
+ *
+ * Use when you need a JSON parser that throws for invalid JSON or unsafe
+ * object shapes.
+ *
+ * **Gotchas**
+ *
+ * Invalid JSON throws through `JSON.parse`. Parsed objects containing an own
+ * `__proto__` property or a dangerous `constructor.prototype` shape throw a
+ * `SyntaxError`.
+ *
+ * @category unsafe
  * @since 4.0.0
  */
 export const unsafeSecureJsonParse = (text: string): unknown => {
   // Performance optimization, see https://github.com/fastify/secure-json-parse/pull/90
-  const { stackTraceLimit } = Error
-  Error.stackTraceLimit = 0
+  const prevLimit = StackTraceLimit.getStackTraceLimit()
+  StackTraceLimit.setStackTraceLimit(0)
   try {
     return _parse(text)
   } finally {
-    Error.stackTraceLimit = stackTraceLimit
+    StackTraceLimit.setStackTraceLimit(prevLimit)
   }
 }
 
@@ -1973,7 +1979,18 @@ export const unsafeSecureJsonParse = (text: string): unknown => {
 export interface EmptyParams extends Schema.$Record<Schema.String, Schema.Never> {}
 
 /**
- * A schema for tools that accept no parameters.
+ * Schema for tools that accept no parameters.
+ *
+ * **When to use**
+ *
+ * Use when you need an explicit no-parameter `parameters` schema for a tool.
+ *
+ * **Details**
+ *
+ * This is `Schema.Record(Schema.String, Schema.Never)`, representing an empty
+ * object parameter shape with no additional properties.
+ *
+ * @see {@link make} for the tool constructor that defaults omitted parameters to this schema
  *
  * @category schemas
  * @since 4.0.0
@@ -1981,6 +1998,6 @@ export interface EmptyParams extends Schema.$Record<Schema.String, Schema.Never>
 export const EmptyParams: EmptyParams = Schema.Record(Schema.String, Schema.Never)
 
 /** @internal */
-export function isEmptyParamsRecord(indexSignature: AST.IndexSignature): boolean {
-  return indexSignature.parameter === AST.string && AST.isNever(indexSignature.type)
+export function isEmptyParamsRecord(indexSignature: SchemaAST.IndexSignature): boolean {
+  return indexSignature.parameter === SchemaAST.string && SchemaAST.isNever(indexSignature.type)
 }

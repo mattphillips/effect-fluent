@@ -1,22 +1,10 @@
 /**
- * Serves Swagger UI for an `HttpApi` by rendering the OpenAPI document generated
- * from the API directly into an HTML page.
+ * Swagger documentation UI for declarative `HttpApi` contracts.
  *
- * Use this module when you want a lightweight documentation route for a running
- * `HttpApi`, typically in development, staging, internal consoles, or public API
- * reference pages where Swagger UI's exploration and request-building tools are
- * preferred. The exported `layer` adds a `GET` route to an `HttpRouter`,
- * defaults the mount path to `/docs`, and leaves API implementation and server
- * wiring to `HttpApiBuilder` and the surrounding router layers.
- *
- * The page is self-contained: `OpenApi.fromApi` derives the specification from
- * the API's groups, endpoints, schemas, and OpenAPI annotations, then the JSON
- * is embedded into the HTML served to the browser. No separate `/openapi.json`
- * endpoint is installed by this module, so clients or documentation pipelines
- * that need the raw spec should use `OpenApi.fromApi` directly or expose a JSON
- * route elsewhere. If the docs are public, mount the layer behind the same
- * routing, security, or environment controls you want for the UI; generated
- * server URLs and operation metadata come from the API's OpenAPI annotations.
+ * This module mounts a browser-based Swagger UI route on an `HttpRouter`. The
+ * page renders the OpenAPI document derived from the supplied `HttpApi`, so a
+ * running application can expose interactive API documentation without writing a
+ * separate OpenAPI file.
  *
  * @since 4.0.0
  */
@@ -30,7 +18,7 @@ import * as Html from "./internal/html.ts"
 import * as internal from "./internal/httpApiSwagger.ts"
 import * as OpenApi from "./OpenApi.ts"
 
-const makeHandler = <Id extends string, Groups extends HttpApiGroup.Any>(options: {
+const makeHandler = <Id extends string, Groups extends HttpApiGroup.Constraint>(options: {
   readonly api: HttpApi.HttpApi<Id, Groups>
 }) => {
   const spec = OpenApi.fromApi(options.api)
@@ -68,7 +56,7 @@ const makeHandler = <Id extends string, Groups extends HttpApiGroup.Any>(options
  * @category layers
  * @since 4.0.0
  */
-export const layer = <Id extends string, Groups extends HttpApiGroup.Any>(
+export const layer = <Id extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<Id, Groups>,
   options?: {
     readonly path?: `/${string}` | undefined

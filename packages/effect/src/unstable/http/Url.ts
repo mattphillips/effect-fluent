@@ -1,28 +1,76 @@
 /**
- * Utilities for parsing and immutably updating HTTP URLs.
+ * Parses and edits platform `URL` values.
  *
- * This module works with the platform `URL` type used by HTTP clients and
- * servers, adding safe constructors and pipeable setters for common workflows
- * such as resolving request targets against a base URL, changing credentials,
- * host, path, protocol, query, and hash components, and reading or rewriting
- * query parameters through `UrlParams`.
- *
- * Parsing and serialization follow the platform WHATWG `URL` behavior. Relative
- * inputs need an explicit base, assigned components may be normalized or
- * percent-encoded by `URL`, and query strings should usually be handled through
- * `UrlParams` when preserving repeated keys or applying key/value encoding is
- * important.
+ * The HTTP modules use the standard `URL` object as their URL representation.
+ * This module adds safe parsing and helpers that return updated copies when
+ * changing credentials, host, path, protocol, query, or hash parts. Query
+ * strings can also be read or updated through `UrlParams`.
  *
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Data from "../../Data.ts"
 import { dual } from "../../Function.ts"
 import * as Redacted from "../../Redacted.ts"
 import * as Result from "../../Result.ts"
 import * as UrlParams from "./UrlParams.ts"
 
 /**
- * Parses a URL string into a `URL` object, returning an `Result` type for safe
+ * Error returned when constructing a `URL` fails.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class UrlError extends Data.TaggedError("UrlError")<{
+  readonly cause: unknown
+}> {}
+
+/**
+ * Creates a `URL` safely by appending `UrlParams` and an optional hash to a URL string.
+ *
+ * **Details**
+ *
+ * Returns a `Result` that fails with `UrlError` if the URL cannot be constructed.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const make = (
+  url: string,
+  params: UrlParams.UrlParams,
+  hash: string | undefined
+): Result.Result<URL, UrlError> =>
+  Result.try({
+    try: () => {
+      const urlInstance = new URL(url, baseUrl())
+      for (let i = 0; i < params.params.length; i++) {
+        const [key, value] = params.params[i]
+        if (value !== undefined) {
+          urlInstance.searchParams.append(key, value)
+        }
+      }
+      if (hash !== undefined) {
+        urlInstance.hash = hash
+      }
+      return urlInstance
+    },
+    catch: (cause) => new UrlError({ cause })
+  })
+
+const baseUrl = (): string | undefined => {
+  if (
+    "location" in globalThis &&
+    globalThis.location !== undefined &&
+    globalThis.location.origin !== undefined &&
+    globalThis.location.pathname !== undefined
+  ) {
+    return location.origin + location.pathname
+  }
+  return undefined
+}
+
+/**
+ * Parses a URL string safely into a `URL` object, returning a `Result` type for
  * error handling.
  *
  * **Details**
@@ -81,8 +129,7 @@ export const fromString: {
   })
 
 /**
- * This function clones the original `URL` object and applies a callback to the
- * clone, allowing multiple updates at once.
+ * Updates a cloned `URL` with a callback, allowing multiple changes at once.
  *
  * **Example** (Mutating URL credentials)
  *
@@ -100,7 +147,7 @@ export const fromString: {
  * // Output: Mutated: https://user:pass@example.com/
  * ```
  *
- * @category Modifiers
+ * @category modifiers
  * @since 4.0.0
  */
 export const mutate: {
@@ -125,7 +172,7 @@ const immutableURLSetter = <P extends keyof URL, A = never>(property: P): {
 /**
  * Updates the hash fragment of the URL.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setHash: {
@@ -136,7 +183,7 @@ export const setHash: {
 /**
  * Updates the host (domain and port) of the URL.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setHost: {
@@ -147,7 +194,7 @@ export const setHost: {
 /**
  * Updates the domain of the URL without modifying the port.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setHostname: {
@@ -158,7 +205,7 @@ export const setHostname: {
 /**
  * Replaces the entire URL string.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setHref: {
@@ -169,7 +216,7 @@ export const setHref: {
 /**
  * Updates the password used for authentication.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setPassword: {
@@ -185,7 +232,7 @@ export const setPassword: {
 /**
  * Updates the path of the URL.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setPathname: {
@@ -196,7 +243,7 @@ export const setPathname: {
 /**
  * Updates the port of the URL.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setPort: {
@@ -207,7 +254,7 @@ export const setPort: {
 /**
  * Updates the protocol (e.g., `http`, `https`).
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setProtocol: {
@@ -218,7 +265,7 @@ export const setProtocol: {
 /**
  * Updates the query string of the URL.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setSearch: {
@@ -229,7 +276,7 @@ export const setSearch: {
 /**
  * Updates the username used for authentication.
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setUsername: {
@@ -263,15 +310,15 @@ export const setUsername: {
  * // Output: https://example.com/?key=value
  * ```
  *
- * @category Setters
+ * @category setters
  * @since 4.0.0
  */
 export const setUrlParams: {
-  (urlParams: UrlParams.UrlParams): (url: URL) => URL
-  (url: URL, urlParams: UrlParams.UrlParams): URL
-} = dual(2, (url: URL, searchParams: UrlParams.UrlParams) =>
+  (urlParams: UrlParams.Input): (url: URL) => URL
+  (url: URL, urlParams: UrlParams.Input): URL
+} = dual(2, (url: URL, urlParams: UrlParams.Input) =>
   mutate(url, (url) => {
-    url.search = UrlParams.toString(searchParams)
+    url.search = UrlParams.toString(UrlParams.fromInput(urlParams))
   }))
 
 /**
@@ -303,7 +350,7 @@ export const setUrlParams: {
 export const urlParams = (url: URL): UrlParams.UrlParams => UrlParams.fromInput(url.searchParams)
 
 /**
- * Reads, modifies, and updates the query parameters of a URL.
+ * Reads the query parameters of a URL, modifies them, and updates the URL.
  *
  * **Details**
  *
@@ -325,13 +372,13 @@ export const urlParams = (url: URL): UrlParams.UrlParams => UrlParams.fromInput(
  * // Output: https://example.com/?foo=bar&key=value
  * ```
  *
- * @category Modifiers
+ * @category modifiers
  * @since 4.0.0
  */
 export const modifyUrlParams: {
-  (f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams): (url: URL) => URL
-  (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams): URL
-} = dual(2, (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams) =>
+  (f: (urlParams: UrlParams.UrlParams) => UrlParams.Input): (url: URL) => URL
+  (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.Input): URL
+} = dual(2, (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.Input) =>
   mutate(url, (url) => {
     const params = f(UrlParams.fromInput(url.searchParams))
     url.search = UrlParams.toString(params)
