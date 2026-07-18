@@ -1,3 +1,4 @@
+export * from './Duration.js';
 export * from './Effect.js';
 export * from './HashMap.js';
 export * from './HashSet.js';
