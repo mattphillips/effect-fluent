@@ -20,9 +20,9 @@ export type ExitTypeId = typeof ExitTypeId;
  * The result of running an `Effect`: either a `Success` carrying a value or a
  * `Failure` carrying a fluent `Cause`.
  *
- * Fluent Exits implement the core `Effect` interface, so they can be yielded
+ * Fluent Exits implement the core `Effect` interface so they can be yielded
  * directly inside `Effect.gen` (resuming with the value or failing with the
- * cause).
+ * cause). For any other core usage, unbox explicitly with the `exit` getter.
  *
  * @example
  * ```ts

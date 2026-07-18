@@ -1,4 +1,4 @@
-import { Exit as _Exit } from 'effect';
+import { Effect as _CoreEffect, Exit as _Exit } from 'effect';
 import { describe, it } from '@effect-fluent/vitest';
 import {
   assertFailure,
@@ -238,6 +238,14 @@ describe('Exit', () => {
       const core = _Exit.succeed(1);
       const fluent = Exit.wrap(core);
       assertTrue(fluent.exit === core);
+    });
+
+    it('the exit getter unboxes for direct core execution', () => {
+      // Fluent Exits are yieldable inside gen; for any other core usage the
+      // supported path is explicit unboxing via the exit getter.
+      deepStrictEqual(_CoreEffect.runSyncExit(Exit.succeed(42).exit), _Exit.succeed(42));
+      deepStrictEqual(_CoreEffect.runSyncExit(Exit.fail('boom').exit), _Exit.fail('boom'));
+      deepStrictEqual(_CoreEffect.runSyncExit(Effect.succeed(10).map((n) => n * 2).effect), _Exit.succeed(20));
     });
 
     it('with applies a core transformation and re-wraps', () => {

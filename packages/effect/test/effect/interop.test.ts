@@ -1,7 +1,8 @@
 import { describe, it } from '@effect-fluent/vitest';
-import { strictEqual } from '@effect-fluent/vitest/utils';
+import { assertFalse, assertTrue, strictEqual } from '@effect-fluent/vitest/utils';
 import { Effect as _Effect, Fiber } from 'effect';
 import { TestClock } from 'effect/testing';
+import { Duration } from '../../src/Duration.js';
 import { Effect } from '../../src/Effect.js';
 
 describe('Effect Interop', () => {
@@ -58,5 +59,34 @@ describe('Effect Interop', () => {
         strictEqual(result, 1);
       })
     );
+  });
+
+  // Regression tests from the 2026-07-18 review (docs/reviews/2026-07-18-review.md)
+
+  describe('fluent Duration inputs', () => {
+    it.effect('sleep accepts the fluent Duration and waits the full duration', () =>
+      Effect.gen(function* () {
+        let done = false;
+        yield* Effect.sleep(Duration.millis(50))
+          .tap(Effect.sync(() => (done = true)))
+          .with(_Effect.forkChild);
+        yield* TestClock.adjust(49);
+        assertFalse(done); // a mangled fluent Duration would decode to a 0ms sleep
+        yield* TestClock.adjust(1);
+        assertTrue(done);
+      })
+    );
+
+    it.effect('sleep still accepts core duration inputs', () =>
+      Effect.gen(function* () {
+        let done = false;
+        yield* Effect.sleep('50 millis')
+          .tap(Effect.sync(() => (done = true)))
+          .with(_Effect.forkChild);
+        yield* TestClock.adjust(50);
+        assertTrue(done);
+      })
+    );
+
   });
 });

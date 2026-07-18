@@ -1,4 +1,4 @@
-import { Array as Arr, Effect as _Effect, Duration, Scheduler, Scope } from 'effect';
+import { Array as Arr, Effect as _Effect, Scheduler, Scope } from 'effect';
 import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
@@ -8,6 +8,7 @@ import type { Refinement } from 'effect/Predicate';
 import type * as _Schedule from 'effect/Schedule';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
 import { Cause } from './Cause.js';
+import { Duration } from './Duration.js';
 import { Exit } from './Exit.js';
 import { Option } from './Option.js';
 import { Result } from './Result.js';
@@ -30,12 +31,13 @@ export type EffectTypeId = typeof EffectTypeId;
  * services of type `R`. Combinators are exposed as chainable methods and
  * getters instead of standalone functions.
  *
- * Fluent Effects implement the core `Effect` interface, so they can be yielded
- * with `yield*` inside both core and fluent `Effect.gen`, and passed to any API
- * that expects a core Effect. Use {@link Effect.wrap | wrap} to lift a core
- * Effect into the fluent class, the {@link Effect.effect | effect} getter to
- * unwrap it, and {@link Effect.with | with} to apply a core transformation
- * while staying fluent.
+ * Fluent Effects implement the core `Effect` interface so they can be yielded
+ * with `yield*` inside both core and fluent `Effect.gen`. For any other core
+ * usage — running, or passing to core combinators — unbox explicitly first:
+ * use the {@link Effect.effect | effect} getter to get the underlying core
+ * Effect, {@link Effect.wrap | wrap} to lift a core Effect into the fluent
+ * class, and {@link Effect.with | with} to apply a core transformation while
+ * staying fluent.
  *
  * @example
  * ```ts
@@ -189,8 +191,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *
    * @example
    * ```ts
-   * import { Cause } from "effect"
-   * import { Effect } from "effect-fluent"
+   * import { Cause, Effect } from "effect-fluent"
    *
    * const program = Effect.failCause(Cause.fail("Something went wrong"))
    * ```
@@ -205,8 +206,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *
    * @example
    * ```ts
-   * import { Cause } from "effect"
-   * import { Effect } from "effect-fluent"
+   * import { Cause, Effect } from "effect-fluent"
    *
    * const program = Effect.failCauseSync(() => Cause.die(new Error("Boom")))
    * ```
@@ -491,7 +491,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * ```
    */
   static sleep(duration: Duration.Input): Effect<void> {
-    return new Effect(_Effect.sleep(duration));
+    return new Effect(_Effect.sleep(Duration.is(duration) ? duration.duration : duration));
   }
 
   /**
@@ -971,11 +971,10 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *
    * @example
    * ```ts
-   * import { Cause } from "effect"
    * import { Effect } from "effect-fluent"
    *
    * const program = Effect.die(new Error("Boom")).tapCauseIf(
-   *   (cause) => Cause.hasDies(cause),
+   *   (cause) => cause.hasDies,
    *   (cause) => Effect.sync(() => console.error("Defect cause:", cause))
    * )
    * ```
@@ -1229,8 +1228,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
 
   /**
    * This effect with its entire outcome — success, typed failure, defect, or
-   * interruption — captured as a core `Exit` value. The resulting effect never
-   * fails.
+   * interruption — captured as a fluent `Exit` value. The resulting effect
+   * never fails.
    *
    * @example
    * ```ts
