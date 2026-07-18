@@ -1,9 +1,9 @@
 import { Array as Arr, Effect as _Effect, Scheduler, Scope } from 'effect';
-import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
+import * as _Result from 'effect/Result';
 import type { Refinement } from 'effect/Predicate';
 import type * as _Schedule from 'effect/Schedule';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
@@ -993,15 +993,15 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   /**
-   * Runs a side effect only when the `Cause` passes the given `Filter`. Both
-   * the filter and the side effect receive fluent `Cause`s; the side effect
-   * also receives the value selected by the filter, and the original cause is
-   * always preserved.
+   * Runs a side effect only when the `Cause` passes the given filter. The
+   * filter receives the fluent `Cause` and returns a fluent `Result`
+   * (succeed to tap, fail with a cause to skip); the side effect receives the
+   * value selected by the filter and the original cause, which is always
+   * preserved.
    *
    * @example
    * ```ts
-   * import { Result } from "effect"
-   * import { Effect } from "effect-fluent"
+   * import { Effect, Result } from "effect-fluent"
    *
    * const program = Effect.die(new Error("Boom")).tapCauseFilter(
    *   (cause) => (cause.hasDies ? Result.succeed(cause) : Result.fail(cause)),
@@ -1010,16 +1010,21 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * ```
    */
   tapCauseFilter<B, E2, R2, EB, X extends Cause<any>>(
-    filter: Filter<Cause<E>, EB, X>,
+    filter: (cause: Cause<E>) => Result<EB, X>,
     f: (a: EB, cause: Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
     return new Effect(
       _Effect.tapCauseFilter(
         this._effect,
-        (cause) =>
-          Result.wrap(filter(Cause.wrap(cause)))
-            .mapError((c) => c.cause)
-            .result,
+        (cause) => {
+          const result = filter(Cause.wrap(cause));
+          return result.isFailure()
+            ? _Result.fail(result.failure.cause)
+            : // The fail side of a success Result is phantom; retype it from the
+              // fluent X to never so it satisfies core tapCauseFilter's
+              // core-Cause constraint.
+              (result.result as _Result.Result<EB, never>);
+        },
         (a, cause) => f(a, Cause.wrap(cause)).effect
       )
     );

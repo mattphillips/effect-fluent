@@ -241,14 +241,24 @@ export class Cause<out E> extends Inspectable {
 
   // --- Equal & Hash ---
 
+  /**
+   * Structural equality with other fluent Causes, delegated to the underlying
+   * core Cause.
+   */
   [Equal.symbol](that: unknown): boolean {
     return Cause.is(that) && Equal.equals(this._cause, that.cause);
   }
 
+  /**
+   * Structural hash consistent with `Equal.symbol`.
+   */
   [Hash.symbol](): number {
     return Hash.hash(this._cause);
   }
 
+  /**
+   * A plain-object representation of the `Cause` for inspection.
+   */
   toJSON(): unknown {
     return (this._cause as any).toJSON?.() ?? { _id: 'Cause', reasons: this.reasons };
   }

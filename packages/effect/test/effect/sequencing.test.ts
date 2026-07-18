@@ -1,7 +1,8 @@
 import { describe, it } from '@effect-fluent/vitest';
 import { assertExitFailure, assertFalse, assertTrue, deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
-import { Data, Result } from 'effect';
+import { Data } from 'effect';
 import { Cause } from '../../src/Cause.js';
+import { Result } from '../../src/Result.js';
 import { Exit } from '../../src/Exit.js';
 import { Effect } from '../../src/Effect.js';
 import { Ref } from '../../src/Ref.js';

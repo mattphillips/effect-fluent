@@ -167,8 +167,8 @@ export class HashSet<out V> extends Inspectable implements Iterable<V> {
   // Preserve the underlying structure's reference-equality guarantees: when a
   // combinator is a no-op upstream (e.g. adding an existing value), return the
   // same fluent wrapper rather than allocating a new one.
-  private _keep(next: _HashSet.HashSet<V>): HashSet<V> {
-    return next === this._set ? this : new HashSet(next);
+  private _keep<V2>(next: _HashSet.HashSet<V2>): HashSet<V2> {
+    return (next as unknown) === (this._set as unknown) ? (this as unknown as HashSet<V2>) : new HashSet(next);
   }
 
   // --- Equal & Hash ---
@@ -344,8 +344,7 @@ export class HashSet<out V> extends Inspectable implements Iterable<V> {
    * ```
    */
   union<V1>(that: HashSet<V1>): HashSet<V | V1> {
-    const next = _HashSet.union(this._set, that.hashSet);
-    return next === (this._set as _HashSet.HashSet<V | V1>) ? this : new HashSet(next);
+    return this._keep(_HashSet.union(this._set, that.hashSet));
   }
 
   /**

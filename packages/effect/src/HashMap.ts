@@ -1,6 +1,7 @@
 import { Equal, Hash } from 'effect';
 import * as _HashMap from 'effect/HashMap';
 import { hasProperty } from 'effect/Predicate';
+import * as _Result from 'effect/Result';
 import { Inspectable } from './Inspectable.js';
 import { Option } from './Option.js';
 import { Result } from './Result.js';
@@ -158,7 +159,9 @@ export class HashMap<out K, out V> extends Inspectable implements Iterable<[K, V
    * ```
    */
   static compact<K, A>(self: HashMap<K, Option<A>>): HashMap<K, A> {
-    return new HashMap(_HashMap.compact(_HashMap.map(self._map, (o) => o.option)));
+    return new HashMap(
+      _HashMap.filterMap(self._map, (option) => (option.isSome() ? _Result.succeed(option.value) : _Result.fail(null)))
+    );
   }
 
   private readonly _map: _HashMap.HashMap<K, V>;
@@ -191,8 +194,8 @@ export class HashMap<out K, out V> extends Inspectable implements Iterable<[K, V
   // combinator is a no-op upstream (e.g. removing an absent key) or mutates in
   // place during mutation mode, return the same fluent wrapper rather than
   // allocating a new one.
-  private _keep(next: _HashMap.HashMap<K, V>): HashMap<K, V> {
-    return next === this._map ? this : new HashMap(next);
+  private _keep<K2, V2>(next: _HashMap.HashMap<K2, V2>): HashMap<K2, V2> {
+    return (next as unknown) === (this._map as unknown) ? (this as unknown as HashMap<K2, V2>) : new HashMap(next);
   }
 
   // --- Equal & Hash ---
@@ -380,8 +383,7 @@ export class HashMap<out K, out V> extends Inspectable implements Iterable<[K, V
    * ```
    */
   set<K1, V1>(key: K1, value: V1): HashMap<K | K1, V | V1> {
-    const next = _HashMap.set<K | K1, V | V1>(this._map, key, value);
-    return next === (this._map as _HashMap.HashMap<K | K1, V | V1>) ? this : new HashMap(next);
+    return this._keep(_HashMap.set<K | K1, V | V1>(this._map, key, value));
   }
 
   /**
@@ -442,8 +444,7 @@ export class HashMap<out K, out V> extends Inspectable implements Iterable<[K, V
    * ```
    */
   setMany<K1, V1>(entries: Iterable<readonly [K1, V1]>): HashMap<K | K1, V | V1> {
-    const next = _HashMap.setMany<K | K1, V | V1>(this._map, entries);
-    return next === (this._map as _HashMap.HashMap<K | K1, V | V1>) ? this : new HashMap(next);
+    return this._keep(_HashMap.setMany<K | K1, V | V1>(this._map, entries));
   }
 
   /**
@@ -709,8 +710,7 @@ export class HashMap<out K, out V> extends Inspectable implements Iterable<[K, V
    * ```
    */
   union<K1, V1>(that: HashMap<K1, V1>): HashMap<K | K1, V | V1> {
-    const next = _HashMap.union(this._map, that.hashMap);
-    return next === (this._map as _HashMap.HashMap<K | K1, V | V1>) ? this : new HashMap(next);
+    return this._keep(_HashMap.union(this._map, that.hashMap));
   }
 
   // --- Mapping operations ---

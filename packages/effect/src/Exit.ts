@@ -62,20 +62,33 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
 
   // --- Equal & Hash ---
 
+  /**
+   * Structural equality with other fluent Exits, delegated to the underlying
+   * core Exit.
+   */
   [Equal.symbol](that: unknown): boolean {
     return is(that) && Equal.equals(this._exit, that.exit);
   }
 
+  /**
+   * Structural hash consistent with `Equal.symbol`.
+   */
   [Hash.symbol](): number {
     return Hash.hash(this._exit);
   }
 
   // --- Generator interop ---
 
+  /**
+   * Makes fluent Exits yieldable with `yield*` inside `Effect.gen`.
+   */
   [Symbol.iterator](): _Effect.EffectIterator<Exit<A, E>> {
     return this._exit[Symbol.iterator]() as any;
   }
 
+  /**
+   * A plain-object representation of the `Exit` for inspection.
+   */
   toJSON(): unknown {
     return (this._exit as any).toJSON?.() ?? { _id: 'Exit', _tag: this._tag };
   }
@@ -288,22 +301,37 @@ class Failure<out A, out E> extends ExitBase<A, E> {
 
 // --- Public type alias ---
 
+/**
+ * The outcome of running an `Effect`: a `Success` carrying the value or a
+ * `Failure` carrying the fluent `Cause`.
+ */
 export type Exit<A, E = never> = Success<A, E> | Failure<A, E>;
 
 type _Success<A, E> = Success<A, E>;
 type _Failure<A, E> = Failure<A, E>;
 
 export namespace Exit {
+  /** A successful `Exit` carrying the value. */
   export type Success<A, E = never> = _Success<A, E>;
+  /** A failed `Exit` carrying the fluent `Cause`. */
   export type Failure<A, E> = _Failure<A, E>;
 }
 
 // --- Static functions ---
 
+/**
+ * Wraps a core `effect` `Exit` in the fluent API. The inverse is the `exit`
+ * getter.
+ */
 const wrap = <A, E>(exit: _Exit.Exit<A, E>): Exit<A, E> => {
   return _Exit.isSuccess(exit) ? new Success(exit) : new Failure(exit);
 };
 
+/**
+ * Checks whether a value is a fluent `Exit`. Corresponds to upstream
+ * `isExit`, but refines to the fluent wrapper rather than the core `effect`
+ * Exit.
+ */
 const is = (u: unknown): u is Exit<unknown, unknown> => hasProperty(u, ExitTypeId);
 
 /**
@@ -331,6 +359,9 @@ const die = (defect: unknown): Exit<never> => wrap(_Exit.die(defect));
  */
 const interrupt = (fiberId?: number | undefined): Exit<never> => wrap(_Exit.interrupt(fiberId));
 
+/**
+ * An `Exit` that succeeded with `undefined`.
+ */
 const void_: Exit<void> = wrap(_Exit.void);
 
 /**
@@ -343,6 +374,9 @@ const asVoidAll = <I extends Iterable<Exit<any, any>>>(
   return wrap(_Exit.asVoidAll(Array.from(exits, (exit) => exit.exit))) as any;
 };
 
+/**
+ * Static constructors and helpers for the fluent `Exit`.
+ */
 export const Exit = {
   succeed,
   fail,
