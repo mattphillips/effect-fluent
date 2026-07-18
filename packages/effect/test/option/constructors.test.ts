@@ -1,6 +1,14 @@
 import { describe, it } from '@effect-fluent/vitest';
-import { assertFalse, assertNone, assertSome, assertTrue, deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
-import { Equal, Hash, Result } from 'effect';
+import {
+  assertFalse,
+  assertNone,
+  assertSome,
+  assertTrue,
+  deepStrictEqual,
+  strictEqual
+} from '@effect-fluent/vitest/utils';
+import { Equal, Hash, Number } from 'effect';
+import { Result } from '../../src/Result.js';
 import { Option } from '../../src/Option.js';
 
 describe('Option', () => {
@@ -170,6 +178,53 @@ describe('Option', () => {
     it('toString - None', () => {
       const s = Option.none().toString();
       assertTrue(s.includes('None'));
+    });
+  });
+
+  describe('void', () => {
+    it('is Some(undefined)', () => {
+      assertSome(Option.void, undefined);
+    });
+  });
+
+  describe('makeReducer', () => {
+    it('treats None as identity', () => {
+      const R = Option.makeReducer(Number.ReducerSum);
+
+      deepStrictEqual(R.combine(Option.some(1), Option.some(2)), Option.some(3));
+      deepStrictEqual(R.combine(Option.some(1), Option.none()), Option.some(1));
+      deepStrictEqual(R.combine(Option.none(), Option.some(2)), Option.some(2));
+      deepStrictEqual(R.combine(Option.none(), Option.none()), Option.none());
+    });
+  });
+
+  describe('makeCombinerFailFast', () => {
+    it('returns None unless both operands are Some', () => {
+      const C = Option.makeCombinerFailFast(Number.ReducerSum);
+
+      deepStrictEqual(C.combine(Option.some(1), Option.some(2)), Option.some(3));
+      deepStrictEqual(C.combine(Option.some(1), Option.none()), Option.none());
+      deepStrictEqual(C.combine(Option.none(), Option.some(2)), Option.none());
+    });
+  });
+
+  describe('makeReducerFailFast', () => {
+    it('collapses to None on any None', () => {
+      const R = Option.makeReducerFailFast(Number.ReducerSum);
+
+      deepStrictEqual(R.combine(Option.some(1), Option.some(2)), Option.some(3));
+      deepStrictEqual(R.combine(Option.some(1), Option.none()), Option.none());
+      deepStrictEqual(R.combine(Option.none(), Option.some(2)), Option.none());
+      deepStrictEqual(R.combine(Option.none(), Option.none()), Option.none());
+
+      deepStrictEqual(R.combine(Option.none(), R.initialValue), Option.none());
+      deepStrictEqual(R.combine(R.initialValue, Option.none()), Option.none());
+      deepStrictEqual(R.combine(Option.some(1), R.initialValue), Option.some(1));
+      deepStrictEqual(R.combine(R.initialValue, Option.some(1)), Option.some(1));
+
+      deepStrictEqual(R.combineAll([Option.some(1), Option.some(2), Option.some(3)]), Option.some(6));
+      deepStrictEqual(R.combineAll([Option.some(1), Option.none(), Option.some(3)]), Option.none());
+      deepStrictEqual(R.combineAll([]), Option.some(0));
     });
   });
 });

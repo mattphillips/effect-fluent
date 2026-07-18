@@ -1,5 +1,6 @@
 import { Equal, Equivalence, Hash } from 'effect';
-import type { Filter } from 'effect/Filter';
+import * as Combiner from 'effect/Combiner';
+import * as Reducer from 'effect/Reducer';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import type { TypeLambda } from 'effect/HKT';
 import * as _Option from 'effect/Option';
@@ -521,6 +522,28 @@ abstract class OptionBase<out A> extends Inspectable {
     return optionWrap(_Option.orElseSome(this._option, value));
   }
 
+  /**
+   * Like `orElse`, but tracks which side produced the value as a fluent
+   * `Result`: the original value becomes `Result.fail` and the fallback's
+   * value becomes `Result.succeed`.
+   *
+   * @example
+   * ```ts
+   * import { Option } from "effect-fluent"
+   *
+   * console.log(Option.some(1).orElseResult(() => Option.some(2)))
+   * // Output: Some(Result.fail(1))
+   *
+   * console.log(Option.none().orElseResult(() => Option.some(2)))
+   * // Output: Some(Result.succeed(2))
+   * ```
+   *
+   * @see {@link orElse} for the simpler variant without source tracking
+   */
+  orElseResult<B>(that: LazyArg<Option<B>>): Option<Result<B, A>> {
+    return this.isSome() ? new OptionSome(Result.fail(this.value)) : that().map(Result.succeed);
+  }
+
   // --- Instance methods: Zipping ---
 
   /**
@@ -659,14 +682,13 @@ abstract class OptionBase<out A> extends Inspectable {
   }
 
   /**
-   * Transforms and filters this `Option` with a `Filter` callback: a
-   * `Result.succeed` keeps and transforms the value, while `Result.fail`
-   * discards it.
+   * Transforms and filters this `Option` with a fluent-`Result`-returning
+   * callback: a `Result.succeed` keeps and transforms the value, while
+   * `Result.fail` discards it.
    *
    * @example
    * ```ts
-   * import { Option } from "effect-fluent"
-   * import { Result } from "effect"
+   * import { Option, Result } from "effect-fluent"
    *
    * console.log(
    *   Option.some(2).filterMap((n) => (n % 2 === 0 ? Result.succeed(`Even: ${n}`) : Result.failVoid))
@@ -676,8 +698,8 @@ abstract class OptionBase<out A> extends Inspectable {
    *
    * @see {@link filter} for predicate-based filtering
    */
-  filterMap<B, X>(f: Filter<A, B, X>): Option<B> {
-    return optionWrap(_Option.filterMap(this._option, f));
+  filterMap<B, X>(f: (a: A) => Result<B, X>): Option<B> {
+    return optionWrap(_Option.filterMap(this._option, (a) => f(a).result));
   }
 
   /**
@@ -686,8 +708,7 @@ abstract class OptionBase<out A> extends Inspectable {
    *
    * @example
    * ```ts
-   * import { Option } from "effect-fluent"
-   * import { Result } from "effect"
+   * import { Option, Result } from "effect-fluent"
    *
    * const [left, right] = Option.some("42").partitionMap((s) =>
    *   isNaN(Number(s)) ? Result.fail("not a number") : Result.succeed(Number(s))
@@ -698,8 +719,8 @@ abstract class OptionBase<out A> extends Inspectable {
    *
    * @see {@link filterMap} to transform and filter into a single `Option`
    */
-  partitionMap<B, C>(f: (a: A) => _Result.Result<C, B>): [left: Option<B>, right: Option<C>] {
-    const [left, right] = _Option.partitionMap(this._option, f);
+  partitionMap<B, C>(f: (a: A) => Result<C, B>): [left: Option<B>, right: Option<C>] {
+    const [left, right] = _Option.partitionMap(this._option, (a) => f(a).result);
     return [optionWrap(left), optionWrap(right)];
   }
 
@@ -1032,13 +1053,12 @@ const optionFromNullOr = <A>(value: A): Option<Exclude<A, null>> =>
 const optionFromIterable = <A>(collection: Iterable<A>): Option<A> => optionWrap(_Option.fromIterable(collection));
 
 /**
- * Converts a core `Result` into an `Option`, keeping only the success value:
+ * Converts a fluent `Result` into an `Option`, keeping only the success value:
  * `Success` becomes `Some` and `Failure` becomes `None`.
  *
  * @example
  * ```ts
- * import { Option } from "effect-fluent"
- * import { Result } from "effect"
+ * import { Option, Result } from "effect-fluent"
  *
  * console.log(Option.getSuccess(Result.succeed("ok")))
  * // Output: { _id: 'Option', _tag: 'Some', value: 'ok' }
@@ -1049,17 +1069,16 @@ const optionFromIterable = <A>(collection: Iterable<A>): Option<A> => optionWrap
  *
  * @see {@link getFailure} for the opposite operation
  */
-const optionGetSuccess = <A, E>(self: _Result.Result<A, E>): Option<A> =>
-  _Result.isSuccess(self) ? new OptionSome(self.success) : new OptionNone<A>();
+const optionGetSuccess = <A, E>(self: Result<A, E>): Option<A> =>
+  self.isSuccess() ? new OptionSome(self.success) : new OptionNone<A>();
 
 /**
- * Converts a core `Result` into an `Option`, keeping only the failure value:
+ * Converts a fluent `Result` into an `Option`, keeping only the failure value:
  * `Failure` becomes `Some` and `Success` becomes `None`.
  *
  * @example
  * ```ts
- * import { Option } from "effect-fluent"
- * import { Result } from "effect"
+ * import { Option, Result } from "effect-fluent"
  *
  * console.log(Option.getFailure(Result.fail("err")))
  * // Output: { _id: 'Option', _tag: 'Some', value: 'err' }
@@ -1070,8 +1089,8 @@ const optionGetSuccess = <A, E>(self: _Result.Result<A, E>): Option<A> =>
  *
  * @see {@link getSuccess} for the opposite operation
  */
-const optionGetFailure = <A, E>(self: _Result.Result<A, E>): Option<E> =>
-  _Result.isFailure(self) ? new OptionSome(self.failure) : new OptionNone<E>();
+const optionGetFailure = <A, E>(self: Result<A, E>): Option<E> =>
+  self.isFailure() ? new OptionSome(self.failure) : new OptionNone<E>();
 
 /**
  * Returns the first `Some` found in an iterable of `Option`s, or `None` if
@@ -1551,9 +1570,90 @@ const optionLift2 = <A, B, C>(
  * console.log(typeof result) // "string"
  * ```
  */
+/**
+ * An `Option` holding `undefined` — the `Option` counterpart of `void`.
+ *
+ * @example
+ * ```ts
+ * import { Option } from "effect-fluent"
+ *
+ * console.log(Option.void.isSome()) // true
+ * ```
+ */
+const optionVoid: Option<void> = optionSome(undefined);
+
+/**
+ * Creates a `Reducer` for `Option<A>` from a `Combiner<A>`: `None` acts as
+ * the identity, and two `Some`s combine their values.
+ *
+ * @example
+ * ```ts
+ * import { Number } from "effect"
+ * import { Option } from "effect-fluent"
+ *
+ * const R = Option.makeReducer(Number.ReducerSum)
+ * console.log(R.combine(Option.some(1), Option.some(2))) // Some(3)
+ * console.log(R.combine(Option.some(1), Option.none())) // Some(1)
+ * ```
+ *
+ * @see {@link makeReducerFailFast} for fail-fast semantics
+ */
+const optionMakeReducer = <A>(combiner: Combiner.Combiner<A>): Reducer.Reducer<Option<A>> => {
+  return Reducer.make((self, that) => {
+    if (self.isNone()) return that;
+    if (that.isNone()) return self;
+    return optionSome(combiner.combine(self.value, that.value));
+  }, optionNone());
+};
+
+/**
+ * Creates a `Combiner` for `Option<A>` with fail-fast semantics: the result
+ * is `None` unless both operands are `Some`.
+ *
+ * @example
+ * ```ts
+ * import { Number } from "effect"
+ * import { Option } from "effect-fluent"
+ *
+ * const C = Option.makeCombinerFailFast(Number.ReducerSum)
+ * console.log(C.combine(Option.some(1), Option.some(2))) // Some(3)
+ * console.log(C.combine(Option.some(1), Option.none())) // None
+ * ```
+ *
+ * @see {@link makeReducerFailFast} to get a full `Reducer`
+ */
+const optionMakeCombinerFailFast = <A>(combiner: Combiner.Combiner<A>): Combiner.Combiner<Option<A>> => {
+  return Combiner.make((self, that) => {
+    if (self.isNone() || that.isNone()) return optionNone();
+    return optionSome(combiner.combine(self.value, that.value));
+  });
+};
+
+/**
+ * Creates a `Reducer` for `Option<A>` by lifting an existing `Reducer` with
+ * fail-fast semantics: any `None` collapses the whole combination to `None`,
+ * and combining collections short-circuits on the first `None`.
+ *
+ * @see {@link makeCombinerFailFast} for just the combiner
+ * @see {@link makeReducer} for non-fail-fast semantics
+ */
+const optionMakeReducerFailFast = <A>(reducer: Reducer.Reducer<A>): Reducer.Reducer<Option<A>> => {
+  const combine = optionMakeCombinerFailFast(reducer).combine;
+  const initialValue = optionSome(reducer.initialValue);
+  return Reducer.make(combine, initialValue, (collection) => {
+    let out: Option<A> = initialValue;
+    for (const value of collection) {
+      out = combine(out, value);
+      if (out.isNone()) return out;
+    }
+    return out;
+  });
+};
+
 export const Option = {
   some: optionSome,
   none: optionNone,
+  void: optionVoid,
   wrap: optionWrap,
   is: optionIs,
   fromNullishOr: optionFromNullishOr,
@@ -1594,7 +1694,10 @@ export const Option = {
   makeOrder: optionMakeOrder,
   lift2: optionLift2,
   containsWith: optionContainsWith,
-  reduceCompact: optionReduceCompact
+  reduceCompact: optionReduceCompact,
+  makeReducer: optionMakeReducer,
+  makeCombinerFailFast: optionMakeCombinerFailFast,
+  makeReducerFailFast: optionMakeReducerFailFast
 } as const;
 
 // -----------------------------------------------------------------------------

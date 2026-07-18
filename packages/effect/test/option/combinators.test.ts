@@ -8,7 +8,8 @@ import {
   strictEqual,
   throws
 } from '@effect-fluent/vitest/utils';
-import { pipe, Result } from 'effect';
+import { pipe } from 'effect';
+import { Result } from '../../src/Result.js';
 import { Option } from '../../src/Option.js';
 
 describe('Option', () => {
@@ -489,6 +490,24 @@ describe('Option', () => {
       );
 
       assertNone(result);
+    });
+  });
+
+  describe('orElseResult', () => {
+    it('tracks which side produced the value', () => {
+      assertSome(
+        Option.some(1).orElseResult(() => Option.some(2)),
+        Result.fail(1)
+      );
+      assertSome(
+        Option.some(1).orElseResult(() => Option.none()),
+        Result.fail(1)
+      );
+      assertSome(
+        Option.none().orElseResult(() => Option.some(2)),
+        Result.succeed(2)
+      );
+      assertNone(Option.none().orElseResult(() => Option.none()));
     });
   });
 });
