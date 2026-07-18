@@ -159,14 +159,14 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Supervision & fibers
 
-- [ ] `awaitAllChildren`
-- [ ] `fiber`
-- [ ] `fiberId`
-- [ ] `forkChild`
-- [ ] `forkDetach`
-- [ ] `forkIn`
-- [ ] `forkScoped`
-- [ ] `withFiber`
+- [x] `awaitAllChildren`
+- [x] `fiber`
+- [x] `fiberId`
+- [x] `forkChild`
+- [x] `forkDetach`
+- [x] `forkIn`
+- [x] `forkScoped`
+- [x] `withFiber`
 
 ## Context / environment
 

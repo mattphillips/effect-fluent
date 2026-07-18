@@ -7,6 +7,7 @@ import type * as DateTime from 'effect/DateTime';
 import type * as _Duration from 'effect/Duration';
 import * as _Effect from 'effect/Effect';
 import * as _Exit from 'effect/Exit';
+import * as _Fiber from 'effect/Fiber';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { Class as PipeableClass } from 'effect/Pipeable';
@@ -873,6 +874,237 @@ export const Exit = {
   is,
   asVoidAll
 } as const;
+
+
+// -----------------------------------------------------------------------------
+// Fiber
+// -----------------------------------------------------------------------------
+
+/**
+ * Unique identifier used to brand fluent `Fiber` instances.
+ */
+export const FiberTypeId: unique symbol = Symbol.for('~effect-fluent/Fiber') as FiberTypeId;
+/**
+ * The type of the `FiberTypeId` brand symbol.
+ */
+export type FiberTypeId = typeof FiberTypeId;
+
+/**
+ * A fluent wrapper around effect's `Fiber`, a handle to a running computation
+ * obtained from the `fork*` family of Effect methods.
+ *
+ * The Effect-returning operations (`await`, `join`, `interrupt`) yield fluent
+ * values; low-level runtime internals (schedulers, context, log levels) remain
+ * reachable through the underlying core fiber via the `fiber` getter.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect-fluent"
+ *
+ * const program = Effect.gen(function* () {
+ *   const fiber = yield* Effect.succeed(42).forkChild()
+ *   const value = yield* fiber.join
+ *   console.log(value) // 42
+ * })
+ * ```
+ */
+export class Fiber<out A, out E = never> extends Inspectable {
+  readonly [FiberTypeId]: FiberTypeId = FiberTypeId;
+
+  /**
+   * Wraps a core `effect` `Fiber` in the fluent API. The inverse is the
+   * `fiber` getter.
+   */
+  static wrap<A, E>(fiber: _Fiber.Fiber<A, E>): Fiber<A, E> {
+    return new Fiber(fiber);
+  }
+
+  /**
+   * Checks whether a value is a fluent `Fiber`.
+   *
+   * Corresponds to upstream `isFiber`, but refines to the fluent wrapper
+   * rather than the core `effect` Fiber.
+   */
+  static is(u: unknown): u is Fiber<any, any> {
+    return hasProperty(u, FiberTypeId);
+  }
+
+  /**
+   * The fiber currently executing, if any, as a fluent `Fiber`.
+   */
+  static getCurrent(): Fiber<any, any> | undefined {
+    const current = _Fiber.getCurrent();
+    return current === undefined ? undefined : new Fiber(current);
+  }
+
+  /**
+   * Awaits all the given fibers, succeeding with their outcomes as fluent
+   * `Exit`s once every fiber has completed.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Fiber } from "effect-fluent"
+   *
+   * const program = Effect.gen(function* () {
+   *   const a = yield* Effect.succeed(1).forkChild()
+   *   const b = yield* Effect.fail("boom").forkChild()
+   *   const exits = yield* Fiber.awaitAll([a, b])
+   *   console.log(exits.map((exit) => exit.isSuccess())) // [true, false]
+   * })
+   * ```
+   */
+  static awaitAll<F extends Fiber<any, any>>(
+    fibers: Iterable<F>
+  ): Effect<Array<Exit<Fiber.Success<F>, Fiber.Error<F>>>> {
+    return Effect.wrap(_Fiber.awaitAll(Array.from(fibers, (fiber) => fiber._fiber))).map((exits) =>
+      exits.map((exit) => Exit.wrap(exit) as Exit<Fiber.Success<F>, Fiber.Error<F>>)
+    );
+  }
+
+  /**
+   * Joins all the given fibers, succeeding with their values or failing with
+   * the first failure.
+   */
+  static joinAll<F extends Fiber<any, any>>(fibers: Iterable<F>): Effect<Array<Fiber.Success<F>>, Fiber.Error<F>> {
+    return Effect.wrap(_Fiber.joinAll(Array.from(fibers, (fiber) => fiber._fiber))) as Effect<
+      Array<Fiber.Success<F>>,
+      Fiber.Error<F>
+    >;
+  }
+
+  /**
+   * Interrupts all the given fibers and awaits their termination.
+   */
+  static interruptAll(fibers: Iterable<Fiber<any, any>>): Effect<void> {
+    return Effect.wrap(_Fiber.interruptAll(Array.from(fibers, (fiber) => fiber._fiber)));
+  }
+
+  /**
+   * Interrupts all the given fibers as the specified interrupting fiber ID and
+   * awaits their termination.
+   */
+  static interruptAllAs(fibers: Iterable<Fiber<any, any>>, fiberId: number): Effect<void> {
+    return Effect.wrap(_Fiber.interruptAllAs(Array.from(fibers, (fiber) => fiber._fiber), fiberId));
+  }
+
+  private readonly _fiber: _Fiber.Fiber<A, E>;
+
+  private constructor(fiber: _Fiber.Fiber<A, E>) {
+    super();
+    this._fiber = fiber;
+  }
+
+  /**
+   * The underlying core `effect` `Fiber`, exposing the low-level runtime
+   * surface (context, schedulers, log levels). The inverse is `Fiber.wrap`.
+   */
+  get fiber(): _Fiber.Fiber<A, E> {
+    return this._fiber;
+  }
+
+  /**
+   * The fiber's numeric ID.
+   */
+  get id(): number {
+    return this._fiber.id;
+  }
+
+  /**
+   * A plain-object representation of the `Fiber` for inspection.
+   */
+  toJSON(): unknown {
+    return { _id: 'Fiber', id: this._fiber.id };
+  }
+
+  /**
+   * Awaits the fiber's completion, succeeding with its outcome as a fluent
+   * `Exit`. Never fails; interruption of the awaited fiber is captured in the
+   * Exit.
+   */
+  get await(): Effect<Exit<A, E>> {
+    return Effect.wrap(_Fiber.await(this._fiber)).map(Exit.wrap);
+  }
+
+  /**
+   * Awaits the fiber's completion and succeeds with its value, propagating
+   * the fiber's failure cause if it failed.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.gen(function* () {
+   *   const fiber = yield* Effect.succeed(42).forkChild()
+   *   console.log(yield* fiber.join) // 42
+   * })
+   * ```
+   */
+  get join(): Effect<A, E> {
+    return Effect.wrap(_Fiber.join(this._fiber));
+  }
+
+  /**
+   * Interrupts the fiber and awaits its termination.
+   */
+  get interrupt(): Effect<void> {
+    return Effect.wrap(_Fiber.interrupt(this._fiber));
+  }
+
+  /**
+   * Interrupts the fiber as the specified interrupting fiber ID and awaits
+   * its termination.
+   */
+  interruptAs(fiberId: number | undefined, annotations?: Context.Context<never> | undefined): Effect<void> {
+    return Effect.wrap(_Fiber.interruptAs(this._fiber, fiberId, annotations));
+  }
+
+  /**
+   * Interrupts the fiber without waiting for it to terminate.
+   */
+  interruptUnsafe(fiberId?: number | undefined, annotations?: Context.Context<never> | undefined): void {
+    this._fiber.interruptUnsafe(fiberId, annotations);
+  }
+
+  /**
+   * The fiber's outcome as a fluent `Exit` if it has completed, or
+   * `undefined` while it is still running.
+   */
+  get pollUnsafe(): Exit<A, E> | undefined {
+    const exit = this._fiber.pollUnsafe();
+    return exit === undefined ? undefined : Exit.wrap(exit);
+  }
+
+  /**
+   * Registers a callback invoked with the fiber's fluent `Exit` when it
+   * completes. Returns a function that unregisters the callback.
+   */
+  addObserver(callback: (exit: Exit<A, E>) => void): () => void {
+    return this._fiber.addObserver((exit) => callback(Exit.wrap(exit)));
+  }
+
+  /**
+   * Binds the fiber's lifetime to the given scope: closing the scope
+   * interrupts the fiber. Returns the same fluent `Fiber`.
+   */
+  runIn(scope: Scope.Scope): Fiber<A, E> {
+    const next = _Fiber.runIn(this._fiber, scope);
+    return next === this._fiber ? this : new Fiber(next);
+  }
+
+  /**
+   * Applies a core `Fiber` transformation and re-wraps the fluent `Fiber`.
+   */
+  with<A2, E2>(f: (fiber: _Fiber.Fiber<A, E>) => _Fiber.Fiber<A2, E2>): Fiber<A2, E2> {
+    return new Fiber(f(this._fiber));
+  }
+}
+
+export namespace Fiber {
+  /** Extracts the success type of a fluent `Fiber`. */
+  export type Success<F> = F extends Fiber<infer A, any> ? A : never;
+  /** Extracts the error type of a fluent `Fiber`. */
+  export type Error<F> = F extends Fiber<any, infer E> ? E : never;
+}
 
 // -----------------------------------------------------------------------------
 // Schedule
@@ -2044,6 +2276,38 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   /**
+   * An `Effect` that succeeds with the fluent `Fiber` currently executing it.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.gen(function* () {
+   *   const fiber = yield* Effect.fiber
+   *   console.log(fiber.id)
+   * })
+   * ```
+   */
+  static get fiber(): Effect<Fiber<unknown, unknown>> {
+    return new Effect(_Effect.fiber).map(Fiber.wrap);
+  }
+
+  /**
+   * An `Effect` that succeeds with the ID of the fiber currently executing it.
+   */
+  static get fiberId(): Effect<number> {
+    return new Effect(_Effect.fiberId);
+  }
+
+  /**
+   * Creates an `Effect` from a function receiving the executing fluent
+   * `Fiber` — a low-level constructor for fiber-aware effects.
+   */
+  static withFiber<A, E = never, R = never>(evaluate: (fiber: Fiber<unknown, unknown>) => Effect<A, E, R>): Effect<A, E, R> {
+    return new Effect(_Effect.withFiber((fiber) => evaluate(Fiber.wrap(fiber)).effect));
+  }
+
+  /**
    * Combines multiple effects into one. Accepts a tuple, iterable, or struct of
    * effects and collects their results in the same shape. Options control
    * `concurrency`, discarding results (`discard`), and collecting failures as
@@ -2772,6 +3036,77 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    */
   get eventually(): Effect<A, never, R> {
     return new Effect(_Effect.eventually(this._effect));
+  }
+
+  // --- Supervision & fibers ---
+
+  /**
+   * Forks this effect as a child of the current fiber, succeeding immediately
+   * with a fluent `Fiber` handle. The child is interrupted when its parent
+   * terminates.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.gen(function* () {
+   *   const fiber = yield* Effect.sleep("1 second").as("done").forkChild()
+   *   const result = yield* fiber.join
+   *   console.log(result) // "done"
+   * })
+   * ```
+   */
+  forkChild(options?: {
+    readonly startImmediately?: boolean | undefined;
+    readonly uninterruptible?: boolean | 'inherit' | undefined;
+  }): Effect<Fiber<A, E>, never, R> {
+    return new Effect(_Effect.forkChild(this._effect, options)).map(Fiber.wrap);
+  }
+
+  /**
+   * Forks this effect as a detached (daemon) fiber with no parent,
+   * succeeding immediately with a fluent `Fiber` handle. The fiber runs until
+   * it completes or is explicitly interrupted.
+   */
+  forkDetach(options?: {
+    readonly startImmediately?: boolean | undefined;
+    readonly uninterruptible?: boolean | 'inherit' | undefined;
+  }): Effect<Fiber<A, E>, never, R> {
+    return new Effect(_Effect.forkDetach(this._effect, options)).map(Fiber.wrap);
+  }
+
+  /**
+   * Forks this effect into the given `Scope`: closing the scope interrupts
+   * the fiber. Succeeds immediately with a fluent `Fiber` handle.
+   */
+  forkIn(
+    scope: Scope.Scope,
+    options?: {
+      readonly startImmediately?: boolean | undefined;
+      readonly uninterruptible?: boolean | 'inherit' | undefined;
+    }
+  ): Effect<Fiber<A, E>, never, R> {
+    return new Effect(_Effect.forkIn(this._effect, scope, options)).map(Fiber.wrap);
+  }
+
+  /**
+   * Forks this effect into the enclosing `Scope` from the environment:
+   * closing that scope interrupts the fiber. Succeeds immediately with a
+   * fluent `Fiber` handle.
+   */
+  forkScoped(options?: {
+    readonly startImmediately?: boolean | undefined;
+    readonly uninterruptible?: boolean | 'inherit' | undefined;
+  }): Effect<Fiber<A, E>, never, R | Scope.Scope> {
+    return new Effect(_Effect.forkScoped(this._effect, options)).map(Fiber.wrap);
+  }
+
+  /**
+   * This effect, additionally waiting for all of its child fibers to
+   * terminate before completing.
+   */
+  get awaitAllChildren(): Effect<A, E, R> {
+    return new Effect(_Effect.awaitAllChildren(this._effect));
   }
 
   /**

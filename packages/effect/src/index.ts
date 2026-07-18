@@ -2,6 +2,7 @@ export * from './Cause.js';
 export * from './Duration.js';
 export * from './Effect.js';
 export * from './Exit.js';
+export * from './Fiber.js';
 export * from './HashMap.js';
 export * from './HashSet.js';
 export * from './Option.js';
