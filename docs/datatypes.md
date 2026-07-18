@@ -60,6 +60,17 @@ Modest combinator surfaces, but methods return Effects — wrapping keeps user c
 in one idiom (operations yield fluent `Effect`). Fill in opportunistically as
 Effect combinators demand them:
 
+Note on urgency: several of these are already method-shaped upstream —
+`Semaphore` in particular is an interface of methods on the handle
+(`sem.withPermits(n)(effect)`, `sem.take(n)`, `sem.releaseAll`), with the
+module-level functions as thin data-first delegates. Since core Effects are
+directly `yield*`-able inside fluent `Effect.gen`, such handles are largely
+usable today unwrapped; a wrapper's value-add is the altitude fix (methods
+accepting/returning fluent Effects for chaining without `Effect.wrap`) plus
+small shape cleanups (e.g. flattening curried `withPermits(n)(effect)`).
+Batch them (Queue/Deferred/Latch/Semaphore share the pattern) rather than
+doing them piecemeal.
+
 - **Concurrency primitives**: `Queue`, `PubSub`, `Deferred`, `Latch`, `Semaphore`,
   `PartitionedSemaphore`.
 - **Ref family**: `SynchronizedRef`, `SubscriptionRef` (obvious next two after
