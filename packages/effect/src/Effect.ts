@@ -1,10 +1,13 @@
-import { Array as Arr, Effect as _Effect, Cause, Duration, Exit, Scheduler, Scope } from 'effect';
+import { Array as Arr, Effect as _Effect, Duration, Scheduler, Scope } from 'effect';
+import * as _Cause from 'effect/Cause';
 import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
+import { Cause } from './Cause.js';
+import { Exit } from './Exit.js';
 import { Option } from './Option.js';
 import { Result } from './Result.js';
 
@@ -190,8 +193,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * const program = Effect.failCause(Cause.fail("Something went wrong"))
    * ```
    */
-  static failCause<E>(cause: Cause.Cause<E>): Effect<never, E> {
-    return new Effect(_Effect.failCause(cause));
+  static failCause<E>(cause: Cause<E>): Effect<never, E> {
+    return new Effect(_Effect.failCause(cause.cause));
   }
 
   /**
@@ -206,8 +209,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * const program = Effect.failCauseSync(() => Cause.die(new Error("Boom")))
    * ```
    */
-  static failCauseSync<E>(evaluate: LazyArg<Cause.Cause<E>>): Effect<never, E> {
-    return new Effect(_Effect.failCauseSync(evaluate));
+  static failCauseSync<E>(evaluate: LazyArg<Cause<E>>): Effect<never, E> {
+    return new Effect(_Effect.failCauseSync(() => evaluate().cause));
   }
 
   /**
@@ -297,7 +300,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *   })
    * ```
    */
-  static tryPromise<A, E = Cause.UnknownError>(
+  static tryPromise<A, E = _Cause.UnknownError>(
     options:
       | { readonly try: (signal: AbortSignal) => PromiseLike<A>; readonly catch: (error: unknown) => E }
       | ((signal: AbortSignal) => PromiseLike<A>)
@@ -351,7 +354,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * const missing = Effect.fromOption(Option.none()) // fails with NoSuchElementError
    * ```
    */
-  static fromOption<A>(option: Option<A>): Effect<A, Cause.NoSuchElementError> {
+  static fromOption<A>(option: Option<A>): Effect<A, _Cause.NoSuchElementError> {
     return new Effect(_Effect.fromOption(option.option));
   }
 
@@ -956,8 +959,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * )
    * ```
    */
-  tapCause<X, E2, R2>(f: (cause: Cause.Cause<E>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCause(this._effect, (cause) => f(cause).effect));
+  tapCause<X, E2, R2>(f: (cause: Cause<E>) => Effect<X, E2, R2>): Effect<A, E | E2, R | R2> {
+    return new Effect(_Effect.tapCause(this._effect, (cause) => f(Cause.wrap(cause)).effect));
   }
 
   /**
@@ -976,10 +979,16 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * ```
    */
   tapCauseIf<B, E2, R2>(
-    predicate: (cause: Cause.Cause<E>) => boolean,
-    f: (cause: Cause.Cause<E>) => Effect<B, E2, R2>
+    predicate: (cause: Cause<E>) => boolean,
+    f: (cause: Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCauseIf(this._effect, predicate, (cause) => f(cause).effect));
+    return new Effect(
+      _Effect.tapCauseIf(
+        this._effect,
+        (cause) => predicate(Cause.wrap(cause)),
+        (cause) => f(Cause.wrap(cause)).effect
+      )
+    );
   }
 
   /**
@@ -998,11 +1007,11 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * )
    * ```
    */
-  tapCauseFilter<B, E2, R2, EB, X extends Cause.Cause<any>>(
-    filter: Filter<Cause.Cause<E>, EB, X>,
-    f: (a: EB, cause: Cause.Cause<E>) => Effect<B, E2, R2>
+  tapCauseFilter<B, E2, R2, EB, X extends _Cause.Cause<any>>(
+    filter: Filter<_Cause.Cause<E>, EB, X>,
+    f: (a: EB, cause: Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, cause).effect));
+    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, Cause.wrap(cause)).effect));
   }
 
   /**
@@ -1036,8 +1045,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * })
    * ```
    */
-  get exit(): Effect<Exit.Exit<A, E>, never, R> {
-    return new Effect(_Effect.exit(this._effect));
+  get exit(): Effect<Exit<A, E>, never, R> {
+    return new Effect(_Effect.exit(this._effect)).map(Exit.wrap);
   }
 
   /**

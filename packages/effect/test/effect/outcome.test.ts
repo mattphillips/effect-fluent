@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@effect-fluent/vitest';
 import { assertExitFailure, assertExitSuccess } from '@effect-fluent/vitest/utils';
-import { Cause } from 'effect';
+import { Cause } from '../../src/Cause.js';
 import { Effect } from '../../src/Effect.js';
 
 describe('Effect', () => {

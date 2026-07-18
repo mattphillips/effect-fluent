@@ -1,6 +1,7 @@
 import { describe, it } from '@effect-fluent/vitest';
 import { assertNone, assertSome, deepStrictEqual, strictEqual, assertTrue } from '@effect-fluent/vitest/utils';
-import { Effect as _Effect, Cause, Exit, Fiber, Option as _Option } from 'effect';
+import { Effect as _Effect, Exit, Fiber, Option as _Option } from 'effect';
+import { Cause } from '../../src/Cause.js';
 import { TestClock } from 'effect/testing';
 import { Effect } from '../../src/Effect.js';
 import { Option } from '../../src/Option.js';
@@ -242,7 +243,7 @@ describe('Effect', () => {
       it.effect('interrupts the fiber', () =>
         Effect.gen(function* () {
           const exit = yield* Effect.interrupt.exit;
-          assertTrue(Exit.isFailure(exit));
+          assertTrue(exit.isFailure());
         })
       );
     });

@@ -1,6 +1,8 @@
 import { describe, it } from '@effect-fluent/vitest';
 import { assertExitFailure, assertFalse, assertTrue, deepStrictEqual, strictEqual } from '@effect-fluent/vitest/utils';
-import { Cause, Data, Exit, Result } from 'effect';
+import { Data, Result } from 'effect';
+import { Cause } from '../../src/Cause.js';
+import { Exit } from '../../src/Exit.js';
 import { Effect } from '../../src/Effect.js';
 import { Ref } from '../../src/Ref.js';
 
@@ -134,7 +136,7 @@ describe('Effect', () => {
     describe('tapCause', () => {
       it.effect('taps into the cause of a failure', () =>
         Effect.gen(function* () {
-          const ref = yield* Ref.make<Cause.Cause<string>>(Cause.empty);
+          const ref = yield* Ref.make<Cause<string>>(Cause.empty);
           const result = yield* Effect.fail('error').tapCause((cause) => ref.set(cause)).exit;
           assertExitFailure(result, Cause.fail('error'));
           deepStrictEqual(yield* ref.get, Cause.fail('error'));
@@ -155,9 +157,9 @@ describe('Effect', () => {
       it.effect('predicate match taps', () =>
         Effect.gen(function* () {
           const tapped: Array<string> = [];
-          const result = yield* Effect.fail('e1').tapCauseIf(Cause.hasFails, (cause) =>
+          const result = yield* Effect.fail('e1').tapCauseIf((cause) => cause.hasFails, (cause) =>
             Effect.sync(() => {
-              tapped.push(Cause.squash(cause) as string);
+              tapped.push(cause.squash as string);
             })
           ).exit;
           deepStrictEqual(tapped, ['e1']);
@@ -202,9 +204,9 @@ describe('Effect', () => {
           const tapped: Array<string> = [];
           const result = yield* Effect.fail('e1').tapCauseFilter(
             (cause) => Result.succeed(cause),
-            (cause) =>
+            (_, cause) =>
               Effect.sync(() => {
-                tapped.push(Cause.squash(cause) as string);
+                tapped.push(cause.squash as string);
               })
           ).exit;
           deepStrictEqual(tapped, ['e1']);

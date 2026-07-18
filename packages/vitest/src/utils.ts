@@ -1,13 +1,11 @@
 /**
  * @since 4.0.0
  */
-import type * as Cause from 'effect/Cause';
 import * as Equal from 'effect/Equal';
-import * as Exit from 'effect/Exit';
 import * as Predicate from 'effect/Predicate';
 import * as assert from 'node:assert';
 import { assert as vassert } from 'vitest';
-import { Option, Result } from 'effect-fluent';
+import { Cause, Exit, Option, Result } from 'effect-fluent';
 
 // ----------------------------
 // Primitives
@@ -260,8 +258,8 @@ export function assertFailure<A, E>(
  * @since 4.0.0
  */
 export function assertExitFailure<A, E>(
-  exit: Exit.Exit<A, E>,
-  expected: Cause.Cause<E>,
+  exit: Exit<A, E>,
+  expected: Cause<E>,
   ..._: Array<never>
 ): asserts exit is Exit.Failure<never, E> {
   deepStrictEqual(exit, Exit.failCause(expected));
@@ -273,7 +271,7 @@ export function assertExitFailure<A, E>(
  * @since 4.0.0
  */
 export function assertExitSuccess<A, E>(
-  exit: Exit.Exit<A, E>,
+  exit: Exit<A, E>,
   expected: A,
   ..._: Array<never>
 ): asserts exit is Exit.Success<A, never> {
