@@ -1047,12 +1047,19 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   repeat<A2, E2, R2, O extends Repeat.Options<A2>>(this: Effect<A2, E2, R2>, options: O): Repeat.Return<R2, E2, A2, O>;
   repeat<A2, E2, R2, Output, Error2, Env2>(
     this: Effect<A2, E2, R2>,
-    schedule: Schedule<Output, any, Error2, Env2>
+    schedule: Schedule<Output, unknown, Error2, Env2>
+  ): Effect<Output, E2 | Error2, R2 | Env2>;
+  repeat<A2, E2, R2, Output, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    schedule: Schedule<Output, NoInfer<A2>, Error2, Env2>
   ): Effect<Output, E2 | Error2, R2 | Env2>;
   repeat<A2, E2, R2, Output, Error2, Env2>(
     this: Effect<A2, E2, R2>,
     builder: (
-      $: <O2, E3, R3>(_: Schedule<O2, any, E3, R3>) => Schedule<O2, A2, E3, R3>
+      $: {
+        <O2, E3, R3>(_: Schedule<O2, unknown, E3, R3>): Schedule<O2, A2, E3, R3>;
+        <O2, E3, R3>(_: Schedule<O2, NoInfer<A2>, E3, R3>): Schedule<O2, A2, E3, R3>;
+      }
     ) => Schedule<Output, NoInfer<A2>, Error2, Env2>
   ): Effect<Output, E2 | Error2, R2 | Env2>;
   repeat(arg: any): Effect<any, any, any> {
@@ -1076,15 +1083,31 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    */
   repeatOrElse<A2, E2, R2, B, ES, RS, E3, R3>(
     this: Effect<A2, E2, R2>,
-    schedule: Schedule<B, any, ES, RS>,
+    schedule: Schedule<B, unknown, ES, RS>,
     orElse: (error: E2 | ES, option: Option<B>) => Effect<B, E3, R3>
-  ): Effect<B, E3, R2 | RS | R3> {
+  ): Effect<B, E3, R2 | RS | R3>;
+  repeatOrElse<A2, E2, R2, B, ES, RS, E3, R3>(
+    this: Effect<A2, E2, R2>,
+    schedule: Schedule<B, NoInfer<A2>, ES, RS>,
+    orElse: (error: E2 | ES, option: Option<B>) => Effect<B, E3, R3>
+  ): Effect<B, E3, R2 | RS | R3>;
+  repeatOrElse(
+    schedule: Schedule<any, any, any, any>,
+    orElse: (error: any, option: Option<any>) => Effect<any, any, any>
+  ): Effect<any, any, any> {
     return new Effect(
-      _Effect.repeatOrElse((this as Effect<A2, E2, R2>).effect, schedule.schedule, (error, option) =>
+      _Effect.repeatOrElse(this._effect as any, schedule.schedule, (error, option) =>
         // Upstream's public signature declares Option<B> but its runtime
         // passes Option<Metadata<B, A>>; we honour the documented contract by
-        // projecting the metadata to its output.
-        orElse(error, Option.wrap(option).map((meta: any) => meta.output as B)).effect
+        // projecting the metadata to its output. The shape check keeps this
+        // working if a future upstream beta aligns the runtime with the
+        // public signature and passes Option<B> directly.
+        orElse(
+          error,
+          Option.wrap(option).map((meta: any) =>
+            hasProperty(meta, 'attempt') && hasProperty(meta, 'elapsedSincePrevious') ? (meta as any).output : meta
+          )
+        ).effect
       )
     );
   }
@@ -1111,12 +1134,19 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   retry<A2, E2, R2, O extends Retry.Options<E2>>(this: Effect<A2, E2, R2>, options: O): Retry.Return<R2, E2, A2, O>;
   retry<A2, E2, R2, B, Error2, Env2>(
     this: Effect<A2, E2, R2>,
-    policy: Schedule<B, any, Error2, Env2>
+    policy: Schedule<B, unknown, Error2, Env2>
+  ): Effect<A2, E2 | Error2, R2 | Env2>;
+  retry<A2, E2, R2, B, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    policy: Schedule<B, NoInfer<E2>, Error2, Env2>
   ): Effect<A2, E2 | Error2, R2 | Env2>;
   retry<A2, E2, R2, B, Error2, Env2>(
     this: Effect<A2, E2, R2>,
     builder: (
-      $: <O2, SE, R3>(_: Schedule<O2, any, SE, R3>) => Schedule<O2, E2, SE, R3>
+      $: {
+        <O2, SE, R3>(_: Schedule<O2, unknown, SE, R3>): Schedule<O2, E2, SE, R3>;
+        <O2, SE, R3>(_: Schedule<O2, NoInfer<E2>, SE, R3>): Schedule<O2, E2, SE, R3>;
+      }
     ) => Schedule<B, NoInfer<E2>, Error2, Env2>
   ): Effect<A2, E2 | Error2, R2 | Env2>;
   retry(arg: any): Effect<any, any, any> {
@@ -1140,12 +1170,19 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    */
   retryOrElse<A2, E2, R2, A1, E1, R1, A3, E3, R3>(
     this: Effect<A2, E2, R2>,
-    policy: Schedule<A1, any, E1, R1>,
+    policy: Schedule<A1, unknown, E1, R1>,
     orElse: (e: NoInfer<E2>, out: A1) => Effect<A3, E3, R3>
-  ): Effect<A2 | A3, E1 | E3, R2 | R1 | R3> {
-    return new Effect(
-      _Effect.retryOrElse((this as Effect<A2, E2, R2>).effect, policy.schedule, (e, out) => orElse(e, out).effect)
-    );
+  ): Effect<A2 | A3, E1 | E3, R2 | R1 | R3>;
+  retryOrElse<A2, E2, R2, A1, E1, R1, A3, E3, R3>(
+    this: Effect<A2, E2, R2>,
+    policy: Schedule<A1, NoInfer<E2>, E1, R1>,
+    orElse: (e: NoInfer<E2>, out: A1) => Effect<A3, E3, R3>
+  ): Effect<A2 | A3, E1 | E3, R2 | R1 | R3>;
+  retryOrElse(
+    policy: Schedule<any, any, any, any>,
+    orElse: (e: any, out: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    return new Effect(_Effect.retryOrElse(this._effect as any, policy.schedule, (e, out) => orElse(e, out).effect));
   }
 
   /**
@@ -1172,9 +1209,15 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   scheduleFrom<A2, E2, R2, Output, Error2, Env2>(
     this: Effect<A2, E2, R2>,
     initial: A2,
-    schedule: Schedule<Output, any, Error2, Env2>
-  ): Effect<Output, E2, R2 | Env2> {
-    return new Effect(_Effect.scheduleFrom((this as Effect<A2, E2, R2>).effect, initial, schedule.schedule));
+    schedule: Schedule<Output, unknown, Error2, Env2>
+  ): Effect<Output, E2, R2 | Env2>;
+  scheduleFrom<A2, E2, R2, Output, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    initial: A2,
+    schedule: Schedule<Output, NoInfer<A2>, Error2, Env2>
+  ): Effect<Output, E2, R2 | Env2>;
+  scheduleFrom(initial: any, schedule: Schedule<any, any, any, any>): Effect<any, any, any> {
+    return new Effect(_Effect.scheduleFrom(this._effect as any, initial, schedule.schedule));
   }
 
   /**
@@ -1516,7 +1559,7 @@ export namespace Repeat {
     while?: ((_: A) => boolean | Effect<boolean, any, any>) | undefined;
     until?: ((_: A) => boolean | Effect<boolean, any, any>) | undefined;
     times?: number | undefined;
-    schedule?: Schedule<any, any, any, any> | undefined;
+    schedule?: Schedule<any, A, any, any> | Schedule<any, unknown, any, any> | undefined;
   }
 
   /**
@@ -1548,7 +1591,7 @@ export namespace Retry {
     while?: ((error: E) => boolean | Effect<boolean, any, any>) | undefined;
     until?: ((error: E) => boolean | Effect<boolean, any, any>) | undefined;
     times?: number | undefined;
-    schedule?: Schedule<any, any, any, any> | undefined;
+    schedule?: Schedule<any, E, any, any> | Schedule<any, unknown, any, any> | undefined;
   }
 
   /**

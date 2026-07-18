@@ -324,6 +324,28 @@ describe('Effect', () => {
         );
         strictEqual(result, 1);
       }));
+
+    it.effect('passes Option.none when the effect fails before any schedule step', () =>
+      Effect.gen(function* () {
+        const errors: Array<string> = [];
+        const result = yield* Effect.fail('boom').repeatOrElse(Schedule.recurs(5), (error, lastOutput) => {
+          errors.push(error);
+          return Effect.succeed(lastOutput.isNone() ? -1 : -2);
+        });
+        strictEqual(result, -1);
+        deepStrictEqual(errors, ['boom']);
+      }));
+
+    it.effect('succeeds with the schedule output without invoking orElse when the schedule completes', () =>
+      Effect.gen(function* () {
+        let called = false;
+        const result = yield* Effect.succeed(1).repeatOrElse(Schedule.recurs(2), () => {
+          called = true;
+          return Effect.succeed(-1);
+        });
+        strictEqual(result, 2);
+        strictEqual(called, false);
+      }));
   });
 
   describe('retryOrElse', () => {
@@ -361,6 +383,25 @@ describe('Effect', () => {
         );
         strictEqual(result, 3);
       }));
+  });
+
+  describe('input type-safety', () => {
+    it('rejects input-mismatched schedules at compile time', () => {
+      const numberEffect = Effect.succeed(5);
+      const stringKeyed = Schedule.identity<string>();
+      // @ts-expect-error — a schedule keyed on string input cannot repeat a number effect
+      numberEffect.repeat(stringKeyed);
+      // @ts-expect-error — same via the options object
+      numberEffect.repeat({ schedule: stringKeyed });
+      // @ts-expect-error — a policy keyed on string errors cannot retry a number-error effect
+      Effect.fail(42).retry(stringKeyed);
+      // @ts-expect-error — scheduleFrom input must match the effect's success type
+      numberEffect.scheduleFrom(0, stringKeyed);
+      // exact-input and input-agnostic schedules are accepted
+      numberEffect.repeat(Schedule.identity<number>());
+      numberEffect.repeat(Schedule.recurs(1));
+      strictEqual(true, true);
+    });
   });
 
   describe('eventually', () => {
