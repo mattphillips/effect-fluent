@@ -553,7 +553,7 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    * core Exit.
    */
   [Equal.symbol](that: unknown): boolean {
-    return is(that) && Equal.equals(this._exit, that.exit);
+    return exitIs(that) && Equal.equals(this._exit, that.exit);
   }
 
   /**
@@ -588,35 +588,35 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
   /**
    * Narrows to `Success`.
    */
-  isSuccess(): this is Success<A, E> {
+  isSuccess(): this is ExitSuccess<A, E> {
     return _Exit.isSuccess(this._exit);
   }
 
   /**
    * Narrows to `Failure`.
    */
-  isFailure(): this is Failure<A, E> {
+  isFailure(): this is ExitFailure<A, E> {
     return _Exit.isFailure(this._exit);
   }
 
   /**
    * Narrows to `Failure` when the cause contains typed failures.
    */
-  hasFails(): this is Failure<A, E> {
+  hasFails(): this is ExitFailure<A, E> {
     return _Exit.hasFails(this._exit);
   }
 
   /**
    * Narrows to `Failure` when the cause contains defects.
    */
-  hasDies(): this is Failure<A, E> {
+  hasDies(): this is ExitFailure<A, E> {
     return _Exit.hasDies(this._exit);
   }
 
   /**
    * Narrows to `Failure` when the cause contains interruptions.
    */
-  hasInterrupts(): this is Failure<A, E> {
+  hasInterrupts(): this is ExitFailure<A, E> {
     return _Exit.hasInterrupts(this._exit);
   }
 
@@ -653,28 +653,28 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    * Transforms the success value.
    */
   map<B>(f: (a: A) => B): Exit<B, E> {
-    return wrap(_Exit.map(this._exit, f));
+    return exitWrap(_Exit.map(this._exit, f));
   }
 
   /**
    * Transforms the typed error.
    */
   mapError<E2>(f: (e: E) => E2): Exit<A, E2> {
-    return wrap(_Exit.mapError(this._exit, f));
+    return exitWrap(_Exit.mapError(this._exit, f));
   }
 
   /**
    * Transforms both the success value and the typed error.
    */
   mapBoth<E2, A2>(options: { readonly onFailure: (e: E) => E2; readonly onSuccess: (a: A) => A2 }): Exit<A2, E2> {
-    return wrap(_Exit.mapBoth(this._exit, options));
+    return exitWrap(_Exit.mapBoth(this._exit, options));
   }
 
   /**
    * Discards the success value.
    */
   get asVoid(): Exit<void, E> {
-    return wrap(_Exit.asVoid(this._exit));
+    return exitWrap(_Exit.asVoid(this._exit));
   }
 
   // --- Filters ---
@@ -684,8 +684,8 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    */
   get filterSuccess(): Result<Exit.Success<A>, Exit.Failure<never, E>> {
     return Result.wrap(_Exit.filterSuccess(this._exit)).mapBoth({
-      onSuccess: (success) => wrap(success) as Exit.Success<A>,
-      onFailure: (failure) => wrap(failure) as Exit.Failure<never, E>
+      onSuccess: (success) => exitWrap(success) as Exit.Success<A>,
+      onFailure: (failure) => exitWrap(failure) as Exit.Failure<never, E>
     });
   }
 
@@ -693,7 +693,7 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    * Succeeds with the success value, or fails with the `Failure` exit.
    */
   get filterValue(): Result<A, Exit.Failure<never, E>> {
-    return Result.wrap(_Exit.filterValue(this._exit)).mapError((failure) => wrap(failure) as Exit.Failure<never, E>);
+    return Result.wrap(_Exit.filterValue(this._exit)).mapError((failure) => exitWrap(failure) as Exit.Failure<never, E>);
   }
 
   /**
@@ -701,8 +701,8 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    */
   get filterFailure(): Result<Exit.Failure<never, E>, Exit.Success<A>> {
     return Result.wrap(_Exit.filterFailure(this._exit)).mapBoth({
-      onSuccess: (failure) => wrap(failure) as Exit.Failure<never, E>,
-      onFailure: (success) => wrap(success) as Exit.Success<A>
+      onSuccess: (failure) => exitWrap(failure) as Exit.Failure<never, E>,
+      onFailure: (success) => exitWrap(success) as Exit.Success<A>
     });
   }
 
@@ -712,7 +712,7 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
   get filterCause(): Result<Cause<E>, Exit.Success<A>> {
     return Result.wrap(_Exit.filterCause(this._exit)).mapBoth({
       onSuccess: Cause.wrap,
-      onFailure: (success) => wrap(success) as Exit.Success<A>
+      onFailure: (success) => exitWrap(success) as Exit.Success<A>
     });
   }
 
@@ -720,14 +720,14 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    * Succeeds with the first typed error, or fails with the original `Exit`.
    */
   get findError(): Result<E, Exit<A, E>> {
-    return Result.wrap(_Exit.findError(this._exit)).mapError(wrap);
+    return Result.wrap(_Exit.findError(this._exit)).mapError(exitWrap);
   }
 
   /**
    * Succeeds with the first defect, or fails with the original `Exit`.
    */
   get findDefect(): Result<unknown, Exit<A, E>> {
-    return Result.wrap(_Exit.findDefect(this._exit)).mapError(wrap);
+    return Result.wrap(_Exit.findDefect(this._exit)).mapError(exitWrap);
   }
 
   // --- Getters ---
@@ -757,13 +757,13 @@ abstract class ExitBase<out A, out E> extends Inspectable implements _Effect.Eff
    * Applies a core `Exit` transformation and re-wraps the fluent `Exit`.
    */
   with<B, E2>(f: (exit: _Exit.Exit<A, E>) => _Exit.Exit<B, E2>): Exit<B, E2> {
-    return wrap(f(this._exit));
+    return exitWrap(f(this._exit));
   }
 }
 
 // --- Success and Failure classes ---
 
-class Success<out A, out E = never> extends ExitBase<A, E> {
+class ExitSuccess<out A, out E = never> extends ExitBase<A, E> {
   readonly _tag = 'Success' as const;
   /** The success value. */
   readonly value: A;
@@ -774,7 +774,7 @@ class Success<out A, out E = never> extends ExitBase<A, E> {
   }
 }
 
-class Failure<out A, out E> extends ExitBase<A, E> {
+class ExitFailure<out A, out E> extends ExitBase<A, E> {
   readonly _tag = 'Failure' as const;
   /** The fluent `Cause` describing why the effect failed. */
   readonly cause: Cause<E>;
@@ -791,16 +791,13 @@ class Failure<out A, out E> extends ExitBase<A, E> {
  * The outcome of running an `Effect`: a `Success` carrying the value or a
  * `Failure` carrying the fluent `Cause`.
  */
-export type Exit<A, E = never> = Success<A, E> | Failure<A, E>;
-
-type _Success<A, E> = Success<A, E>;
-type _Failure<A, E> = Failure<A, E>;
+export type Exit<A, E = never> = ExitSuccess<A, E> | ExitFailure<A, E>;
 
 export namespace Exit {
   /** A successful `Exit` carrying the value. */
-  export type Success<A, E = never> = _Success<A, E>;
+  export type Success<A, E = never> = ExitSuccess<A, E>;
   /** A failed `Exit` carrying the fluent `Cause`. */
-  export type Failure<A, E> = _Failure<A, E>;
+  export type Failure<A, E> = ExitFailure<A, E>;
 }
 
 // --- Static functions ---
@@ -809,8 +806,8 @@ export namespace Exit {
  * Wraps a core `effect` `Exit` in the fluent API. The inverse is the `exit`
  * getter.
  */
-const wrap = <A, E>(exit: _Exit.Exit<A, E>): Exit<A, E> => {
-  return _Exit.isSuccess(exit) ? new Success(exit) : new Failure(exit);
+const exitWrap = <A, E>(exit: _Exit.Exit<A, E>): Exit<A, E> => {
+  return _Exit.isSuccess(exit) ? new ExitSuccess(exit) : new ExitFailure(exit);
 };
 
 /**
@@ -818,61 +815,61 @@ const wrap = <A, E>(exit: _Exit.Exit<A, E>): Exit<A, E> => {
  * `isExit`, but refines to the fluent wrapper rather than the core `effect`
  * Exit.
  */
-const is = (u: unknown): u is Exit<unknown, unknown> => hasProperty(u, ExitTypeId);
+const exitIs = (u: unknown): u is Exit<unknown, unknown> => hasProperty(u, ExitTypeId);
 
 /**
  * Creates an `Exit` that succeeded with the given value.
  */
-const succeed = <A>(value: A): Exit<A> => wrap(_Exit.succeed(value));
+const exitSucceed = <A>(value: A): Exit<A> => exitWrap(_Exit.succeed(value));
 
 /**
  * Creates an `Exit` that failed with the given typed error.
  */
-const fail = <E>(error: E): Exit<never, E> => wrap(_Exit.fail(error));
+const exitFail = <E>(error: E): Exit<never, E> => exitWrap(_Exit.fail(error));
 
 /**
  * Creates an `Exit` that failed with the given fluent `Cause`.
  */
-const failCause = <E>(cause: Cause<E>): Exit<never, E> => wrap(_Exit.failCause(cause.cause));
+const exitFailCause = <E>(cause: Cause<E>): Exit<never, E> => exitWrap(_Exit.failCause(cause.cause));
 
 /**
  * Creates an `Exit` that died with the given defect.
  */
-const die = (defect: unknown): Exit<never> => wrap(_Exit.die(defect));
+const exitDie = (defect: unknown): Exit<never> => exitWrap(_Exit.die(defect));
 
 /**
  * Creates an `Exit` that was interrupted, optionally by the given fiber.
  */
-const interrupt = (fiberId?: number | undefined): Exit<never> => wrap(_Exit.interrupt(fiberId));
+const exitInterrupt = (fiberId?: number | undefined): Exit<never> => exitWrap(_Exit.interrupt(fiberId));
 
 /**
  * An `Exit` that succeeded with `undefined`.
  */
-const void_: Exit<void> = wrap(_Exit.void);
+const exitVoid: Exit<void> = exitWrap(_Exit.void);
 
 /**
  * Discards the values of an iterable of `Exit`s, failing with the first
  * failure if any.
  */
-const asVoidAll = <I extends Iterable<Exit<any, any>>>(
+const exitAsVoidAll = <I extends Iterable<Exit<any, any>>>(
   exits: I
 ): Exit<void, I extends Iterable<Exit<infer _A, infer _E>> ? _E : never> => {
-  return wrap(_Exit.asVoidAll(Array.from(exits, (exit) => exit.exit))) as any;
+  return exitWrap(_Exit.asVoidAll(Array.from(exits, (exit) => exit.exit))) as any;
 };
 
 /**
  * Static constructors and helpers for the fluent `Exit`.
  */
 export const Exit = {
-  succeed,
-  fail,
-  failCause,
-  die,
-  interrupt,
-  void: void_,
-  wrap,
-  is,
-  asVoidAll
+  succeed: exitSucceed,
+  fail: exitFail,
+  failCause: exitFailCause,
+  die: exitDie,
+  interrupt: exitInterrupt,
+  void: exitVoid,
+  wrap: exitWrap,
+  is: exitIs,
+  asVoidAll: exitAsVoidAll
 } as const;
 
 
