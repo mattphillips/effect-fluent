@@ -204,7 +204,7 @@ describe('Effect', () => {
           const tapped: Array<string> = [];
           const result = yield* Effect.fail('e1').tapCauseFilter(
             (cause) => Result.succeed(cause),
-            (_, cause) =>
+            (cause) =>
               Effect.sync(() => {
                 tapped.push(cause.squash as string);
               })

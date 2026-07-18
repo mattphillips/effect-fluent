@@ -1,5 +1,4 @@
 import { Array as Arr, Effect as _Effect, Duration, Scheduler, Scope } from 'effect';
-import * as _Cause from 'effect/Cause';
 import type { Filter } from 'effect/Filter';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
@@ -300,7 +299,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *   })
    * ```
    */
-  static tryPromise<A, E = _Cause.UnknownError>(
+  static tryPromise<A, E = Cause.UnknownError>(
     options:
       | { readonly try: (signal: AbortSignal) => PromiseLike<A>; readonly catch: (error: unknown) => E }
       | ((signal: AbortSignal) => PromiseLike<A>)
@@ -354,7 +353,7 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    * const missing = Effect.fromOption(Option.none()) // fails with NoSuchElementError
    * ```
    */
-  static fromOption<A>(option: Option<A>): Effect<A, _Cause.NoSuchElementError> {
+  static fromOption<A>(option: Option<A>): Effect<A, Cause.NoSuchElementError> {
     return new Effect(_Effect.fromOption(option.option));
   }
 
@@ -992,26 +991,36 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   /**
-   * Runs a side effect only when the `Cause` passes the given `Filter`. The
-   * side effect receives both the value selected by the filter and the
-   * original cause, which is always preserved.
+   * Runs a side effect only when the `Cause` passes the given `Filter`. Both
+   * the filter and the side effect receive fluent `Cause`s; the side effect
+   * also receives the value selected by the filter, and the original cause is
+   * always preserved.
    *
    * @example
    * ```ts
-   * import { Cause, Result } from "effect"
+   * import { Result } from "effect"
    * import { Effect } from "effect-fluent"
    *
    * const program = Effect.die(new Error("Boom")).tapCauseFilter(
-   *   (cause) => (Cause.hasDies(cause) ? Result.succeed(cause) : Result.fail(cause)),
+   *   (cause) => (cause.hasDies ? Result.succeed(cause) : Result.fail(cause)),
    *   (selected) => Effect.sync(() => console.error("Defect cause:", selected))
    * )
    * ```
    */
-  tapCauseFilter<B, E2, R2, EB, X extends _Cause.Cause<any>>(
-    filter: Filter<_Cause.Cause<E>, EB, X>,
+  tapCauseFilter<B, E2, R2, EB, X extends Cause<any>>(
+    filter: Filter<Cause<E>, EB, X>,
     f: (a: EB, cause: Cause<E>) => Effect<B, E2, R2>
   ): Effect<A, E | E2, R | R2> {
-    return new Effect(_Effect.tapCauseFilter(this._effect, filter, (a, cause) => f(a, Cause.wrap(cause)).effect));
+    return new Effect(
+      _Effect.tapCauseFilter(
+        this._effect,
+        (cause) =>
+          Result.wrap(filter(Cause.wrap(cause)))
+            .mapError((c) => c.cause)
+            .result,
+        (a, cause) => f(a, Cause.wrap(cause)).effect
+      )
+    );
   }
 
   /**
