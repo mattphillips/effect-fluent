@@ -65,7 +65,7 @@ export class Schedule<Output, Input = unknown, Error = never, Env = never> exten
    * Corresponds to upstream `isSchedule`, but refines to the fluent wrapper
    * rather than the core `effect` Schedule.
    */
-  static is(u: unknown): u is Schedule<unknown, never, unknown, unknown> {
+  static is(u: unknown): u is Schedule<any, any, any, any> {
     return hasProperty(u, ScheduleTypeId);
   }
 

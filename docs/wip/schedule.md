@@ -27,9 +27,9 @@ Fluent integration choices:
 - The `toStep*` getters return fluent `Effect`s of the core step functions
   (`Pull` types stay core).
 
-Note: `Effect.retry` / `Effect.repeat` / `Effect.schedule` are not yet on the
-fluent Effect (tracked in `docs/wip/effect.md`) — until they land, schedules are
-driven via core interop (`.schedule` getter or `.with`).
+Note: the fluent Effect now has `repeat` / `repeatOrElse` / `retry` /
+`retryOrElse` / `schedule` / `scheduleFrom` / `forever` / `eventually`, so
+schedules are driven fluently end to end.
 
 ## Naming differences (covered, no action needed)
 

@@ -41,8 +41,8 @@ helpers that belong as statics on the fluent `Effect` class.
 - [ ] `catchTags`
 - [ ] `ignore`
 - [ ] `ignoreCause`
-- [ ] `retry`
-- [ ] `retryOrElse`
+- [x] `retry`
+- [x] `retryOrElse`
 - [ ] `sandbox`
 - [ ] `unwrapReason`
 - [ ] `withErrorReporting`
@@ -111,12 +111,12 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Repetition & scheduling
 
-- [ ] `eventually`
-- [ ] `forever`
-- [ ] `repeat`
-- [ ] `repeatOrElse`
-- [ ] `schedule`
-- [ ] `scheduleFrom`
+- [x] `eventually`
+- [x] `forever`
+- [x] `repeat`
+- [x] `repeatOrElse`
+- [x] `schedule`
+- [x] `scheduleFrom`
 
 ## Racing
 

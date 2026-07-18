@@ -4,11 +4,14 @@ import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
 import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
+import type { Refinement } from 'effect/Predicate';
+import type * as _Schedule from 'effect/Schedule';
 import type { Concurrency, ExtractTag, Tags } from 'effect/Types';
 import { Cause } from './Cause.js';
 import { Exit } from './Exit.js';
 import { Option } from './Option.js';
 import { Result } from './Result.js';
+import { Schedule } from './Schedule.js';
 
 /**
  * Unique identifier used to brand fluent `Effect` instances.
@@ -1023,6 +1026,191 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
     );
   }
 
+  // --- Repetition & retrying ---
+
+  /**
+   * Repeats this effect according to a fluent `Schedule`, an options object
+   * (`while` / `until` / `times` / `schedule`), or a schedule builder. The
+   * first execution always runs; the policy governs the repeats. Succeeds with
+   * the schedule's final output (or the last value for predicate/times forms).
+   *
+   * @example
+   * ```ts
+   * import { Effect, Schedule } from "effect-fluent"
+   *
+   * const threeTimes = Effect.sync(() => console.log("tick")).repeat({ times: 3 })
+   *
+   * const spaced = Effect.sync(() => Date.now()).repeat(
+   *   Schedule.spaced("1 second").while(({ attempt }) => attempt < 10)
+   * )
+   * ```
+   */
+  repeat<A2, E2, R2, O extends Repeat.Options<A2>>(this: Effect<A2, E2, R2>, options: O): Repeat.Return<R2, E2, A2, O>;
+  repeat<A2, E2, R2, Output, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    schedule: Schedule<Output, any, Error2, Env2>
+  ): Effect<Output, E2 | Error2, R2 | Env2>;
+  repeat<A2, E2, R2, Output, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    builder: (
+      $: <O2, E3, R3>(_: Schedule<O2, any, E3, R3>) => Schedule<O2, A2, E3, R3>
+    ) => Schedule<Output, NoInfer<A2>, Error2, Env2>
+  ): Effect<Output, E2 | Error2, R2 | Env2>;
+  repeat(arg: any): Effect<any, any, any> {
+    return new Effect(_Effect.repeat(this._effect as any, adaptScheduleArg(arg) as any));
+  }
+
+  /**
+   * Repeats this effect according to the given fluent `Schedule`, recovering
+   * from any failure with `orElse`, which receives the error and the
+   * schedule's last output as a fluent `Option`.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Option, Schedule } from "effect-fluent"
+   *
+   * const program = Effect.succeed(1).repeatOrElse(
+   *   Schedule.recurs(3),
+   *   (error, lastOutput) => Effect.succeed(lastOutput.getOrElse(() => 0))
+   * )
+   * ```
+   */
+  repeatOrElse<A2, E2, R2, B, ES, RS, E3, R3>(
+    this: Effect<A2, E2, R2>,
+    schedule: Schedule<B, any, ES, RS>,
+    orElse: (error: E2 | ES, option: Option<B>) => Effect<B, E3, R3>
+  ): Effect<B, E3, R2 | RS | R3> {
+    return new Effect(
+      _Effect.repeatOrElse((this as Effect<A2, E2, R2>).effect, schedule.schedule, (error, option) =>
+        // Upstream's public signature declares Option<B> but its runtime
+        // passes Option<Metadata<B, A>>; we honour the documented contract by
+        // projecting the metadata to its output.
+        orElse(error, Option.wrap(option).map((meta: any) => meta.output as B)).effect
+      )
+    );
+  }
+
+  /**
+   * Retries this effect on failure according to a fluent `Schedule`, an
+   * options object (`while` / `until` / `times` / `schedule` keyed by the
+   * error), or a schedule builder.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Schedule } from "effect-fluent"
+   *
+   * const resilient = Effect.tryPromise(() => fetch("https://example.com")).retry(
+   *   Schedule.exponential("100 millis").jittered.upTo({ times: 5 })
+   * )
+   *
+   * const selective = Effect.fail(new Error("boom")).retry({
+   *   times: 3,
+   *   while: (error) => error.message === "boom"
+   * })
+   * ```
+   */
+  retry<A2, E2, R2, O extends Retry.Options<E2>>(this: Effect<A2, E2, R2>, options: O): Retry.Return<R2, E2, A2, O>;
+  retry<A2, E2, R2, B, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    policy: Schedule<B, any, Error2, Env2>
+  ): Effect<A2, E2 | Error2, R2 | Env2>;
+  retry<A2, E2, R2, B, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    builder: (
+      $: <O2, SE, R3>(_: Schedule<O2, any, SE, R3>) => Schedule<O2, E2, SE, R3>
+    ) => Schedule<B, NoInfer<E2>, Error2, Env2>
+  ): Effect<A2, E2 | Error2, R2 | Env2>;
+  retry(arg: any): Effect<any, any, any> {
+    return new Effect(_Effect.retry(this._effect as any, adaptScheduleArg(arg) as any));
+  }
+
+  /**
+   * Retries this effect on failure according to the given fluent `Schedule`
+   * policy; once the policy is exhausted, recovers with `orElse`, which
+   * receives the final error and the policy's last output.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Schedule } from "effect-fluent"
+   *
+   * const withFallback = Effect.fail("boom").retryOrElse(
+   *   Schedule.recurs(3),
+   *   (error, attempts) => Effect.succeed(`gave up after ${attempts} retries: ${error}`)
+   * )
+   * ```
+   */
+  retryOrElse<A2, E2, R2, A1, E1, R1, A3, E3, R3>(
+    this: Effect<A2, E2, R2>,
+    policy: Schedule<A1, any, E1, R1>,
+    orElse: (e: NoInfer<E2>, out: A1) => Effect<A3, E3, R3>
+  ): Effect<A2 | A3, E1 | E3, R2 | R1 | R3> {
+    return new Effect(
+      _Effect.retryOrElse((this as Effect<A2, E2, R2>).effect, policy.schedule, (e, out) => orElse(e, out).effect)
+    );
+  }
+
+  /**
+   * Runs this effect on the cadence defined by the given fluent `Schedule`,
+   * succeeding with the schedule's final output.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Schedule } from "effect-fluent"
+   *
+   * const heartbeat = Effect.sync(() => console.log("ping")).schedule(
+   *   Schedule.fixed("30 seconds")
+   * )
+   * ```
+   */
+  schedule<Output, Error2, Env2>(schedule: Schedule<Output, unknown, Error2, Env2>): Effect<Output, E, R | Env2> {
+    return new Effect(_Effect.schedule(this._effect, schedule.schedule));
+  }
+
+  /**
+   * Like `schedule`, but seeds the schedule with an initial input before the
+   * first run.
+   */
+  scheduleFrom<A2, E2, R2, Output, Error2, Env2>(
+    this: Effect<A2, E2, R2>,
+    initial: A2,
+    schedule: Schedule<Output, any, Error2, Env2>
+  ): Effect<Output, E2, R2 | Env2> {
+    return new Effect(_Effect.scheduleFrom((this as Effect<A2, E2, R2>).effect, initial, schedule.schedule));
+  }
+
+  /**
+   * Repeats this effect forever without terminating. Never succeeds; only
+   * fails if the effect fails.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const poll = Effect.sync(() => console.log("polling")).forever()
+   * ```
+   */
+  forever(options?: { readonly disableYield?: boolean | undefined }): Effect<never, E, R> {
+    return new Effect(_Effect.forever(this._effect, options));
+  }
+
+  /**
+   * Retries this effect until it succeeds, swallowing all typed errors.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * let attempts = 0
+   * const flaky = Effect.suspend(() =>
+   *   ++attempts < 3 ? Effect.fail("not yet") : Effect.succeed(attempts)
+   * )
+   * const program = flaky.eventually // succeeds with 3
+   * ```
+   */
+  get eventually(): Effect<A, never, R> {
+    return new Effect(_Effect.eventually(this._effect));
+  }
+
   /**
    * This effect with its success and failure channels swapped: an
    * `Effect<A, E, R>` becomes an `Effect<E, A, R>`.
@@ -1318,3 +1506,119 @@ export namespace Gen {
       ? R
       : never;
 }
+
+export namespace Repeat {
+  /**
+   * Options for `Effect#repeat`: continue `while`/`until` a predicate holds
+   * (optionally effectful), for a number of `times`, and/or per a fluent
+   * `schedule`.
+   */
+  export interface Options<A> {
+    while?: ((_: A) => boolean | Effect<boolean, any, any>) | undefined;
+    until?: ((_: A) => boolean | Effect<boolean, any, any>) | undefined;
+    times?: number | undefined;
+    schedule?: Schedule<any, any, any, any> | undefined;
+  }
+
+  /**
+   * Computes the fluent `Effect` returned by `Effect#repeat` for a given
+   * options object.
+   */
+  export type Return<R, E, A, O extends Options<A>> = Effect<
+    O extends { until: Refinement<A, infer B> } ? B : O extends { while: Refinement<A, infer B> } ? Exclude<A, B> : A,
+    | E
+    | (O extends { schedule: Schedule<infer _Out, infer _I, infer E2, infer _R> } ? E2 : never)
+    | (O extends { while: (...args: Array<any>) => Effect<infer _A, infer E2, infer _R> } ? E2 : never)
+    | (O extends { until: (...args: Array<any>) => Effect<infer _A, infer E2, infer _R> } ? E2 : never),
+    | R
+    | (O extends { schedule: Schedule<infer _O, infer _I, infer _E, infer R2> } ? R2 : never)
+    | (O extends { while: (...args: Array<any>) => Effect<infer _A, infer _E, infer R2> } ? R2 : never)
+    | (O extends { until: (...args: Array<any>) => Effect<infer _A, infer _E, infer R2> } ? R2 : never)
+  > extends infer Z
+    ? Z
+    : never;
+}
+
+export namespace Retry {
+  /**
+   * Options for `Effect#retry`: keep retrying `while`/`until` a predicate on
+   * the error holds (optionally effectful), for a number of `times`, and/or
+   * per a fluent `schedule` fed with the errors.
+   */
+  export interface Options<E> {
+    while?: ((error: E) => boolean | Effect<boolean, any, any>) | undefined;
+    until?: ((error: E) => boolean | Effect<boolean, any, any>) | undefined;
+    times?: number | undefined;
+    schedule?: Schedule<any, any, any, any> | undefined;
+  }
+
+  /**
+   * Computes the fluent `Effect` returned by `Effect#retry` for a given
+   * options object.
+   */
+  export type Return<R, E, A, O extends Options<E>> = Effect<
+    A,
+    | (O extends { schedule: Schedule<infer _O, infer _I, infer _E1, infer _R> }
+        ? E
+        : O extends { times: number }
+          ? E
+          : O extends { until: Refinement<E, infer E2> }
+            ? E2
+            : O extends { while: Refinement<E, infer E2> }
+              ? Exclude<E, E2>
+              : E)
+    | (O extends { schedule: Schedule<infer _O, infer _I, infer E2, infer _R> } ? E2 : never)
+    | (O extends { while: (...args: Array<any>) => Effect<infer _A, infer E2, infer _R> } ? E2 : never)
+    | (O extends { until: (...args: Array<any>) => Effect<infer _A, infer E2, infer _R> } ? E2 : never),
+    | R
+    | (O extends { schedule: Schedule<infer _O, infer _I, infer _E1, infer R2> } ? R2 : never)
+    | (O extends { while: (...args: Array<any>) => Effect<infer _A, infer _E, infer R2> } ? R2 : never)
+    | (O extends { until: (...args: Array<any>) => Effect<infer _A, infer _E, infer R2> } ? R2 : never)
+  > extends infer Z
+    ? Z
+    : never;
+}
+
+// -----------------------------------------------------------------------------
+// Internal adapters
+// -----------------------------------------------------------------------------
+
+// Adapts a fluent while/until predicate (which may return a fluent Effect) to
+// the core boolean | core-Effect shape. Generics are honest here, but callers
+// pass through the untyped implementation signatures of the overloaded
+// repeat/retry methods, so no type information actually flows in.
+const adaptPredicate = <I, E2, R2>(
+  f: (input: I) => boolean | Effect<boolean, E2, R2>
+): ((input: I) => boolean | _Effect.Effect<boolean, E2, R2>) => {
+  return (input) => {
+    const result = f(input);
+    return Effect.is(result) ? result.effect : result;
+  };
+};
+
+// The argument shapes accepted by the fluent `repeat`/`retry`: a fluent
+// Schedule, a builder of fluent Schedules ($ is a type-pinning identity at
+// runtime), or an options object. Type parameters are `any` because the
+// overloaded method implementations erase them.
+type ScheduleArg =
+  | Schedule<any, any, any, any>
+  | (($: typeof identity) => Schedule<any, any, any, any>)
+  | Repeat.Options<any>
+  | Retry.Options<any>;
+
+// Adapts a `ScheduleArg` to what the core `repeat`/`retry` expects: a core
+// Schedule or a core options object.
+const adaptScheduleArg = (arg: ScheduleArg): _Schedule.Schedule<any, any, any, any> | _Effect.Repeat.Options<any> => {
+  if (Schedule.is(arg)) {
+    return arg.schedule;
+  }
+  if (isFunction(arg)) {
+    return arg(identity).schedule;
+  }
+  const options: _Effect.Repeat.Options<any> = {};
+  if (arg.while !== undefined) options.while = adaptPredicate(arg.while);
+  if (arg.until !== undefined) options.until = adaptPredicate(arg.until);
+  if (arg.times !== undefined) options.times = arg.times;
+  if (arg.schedule !== undefined) options.schedule = arg.schedule.schedule;
+  return options;
+};
