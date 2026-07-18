@@ -6,7 +6,9 @@
     "build": "tsc -b tsconfig.packages.json && pnpm --recursive --parallel --filter \"./packages/**/*\" run build",
     "test": "vitest",
     "coverage": "vitest --coverage",
-    "check": "tsc -b tsconfig.json"
+    "check": "tsc -b tsconfig.json",
+    "check:fresh": "pnpm clean && pnpm check",
+    "clean": "tsc -b tsconfig.json --clean"
   },
   "devDependencies": {
     "@types/node": "^25.2.0",
