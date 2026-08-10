@@ -10,13 +10,27 @@ import * as _Exit from 'effect/Exit';
 import * as _Fiber from 'effect/Fiber';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
+import type { Severity } from 'effect/LogLevel';
 import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
-import type { Refinement } from 'effect/Predicate';
+import type { Predicate, Refinement } from 'effect/Predicate';
 import type * as Pull from 'effect/Pull';
 import * as _Result from 'effect/Result';
 import * as _Schedule from 'effect/Schedule';
-import type { Concurrency, ExtractTag, Tags, UnionToIntersection } from 'effect/Types';
+import type {
+  Concurrency,
+  ExcludeReason,
+  ExcludeTag,
+  ExtractReason,
+  ExtractTag,
+  NarrowReason,
+  OmitReason,
+  ReasonOf,
+  ReasonTags,
+  Tags,
+  UnionToIntersection,
+  unassigned
+} from 'effect/Types';
 import { Duration } from '../Duration.js';
 import { Inspectable } from '../Inspectable.js';
 import { Option } from '../Option.js';
@@ -465,6 +479,8 @@ export class Cause<out E> extends Inspectable {
 }
 
 export namespace Cause {
+  /** Extracts the error type from a fluent `Cause`. */
+  export type Error<T> = T extends Cause<infer E> ? E : never;
   /** A core reason a `Cause` failed: `Fail`, `Die`, or `Interrupt`. */
   export type Reason<E> = _Cause.Reason<E>;
   /** A typed, expected error produced by `Effect.fail`. */
@@ -2530,6 +2546,22 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
   }
 
   /**
+   * Transforms the typed failure with a pure function, leaving the success
+   * value and requirements unchanged.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Oh no!").mapError((message) => new Error(message))
+   * // fails with Error("Oh no!")
+   * ```
+   */
+  mapError<E2>(f: (e: E) => E2): Effect<A, E2, R> {
+    return new Effect(_Effect.mapError(this._effect, f));
+  }
+
+  /**
    * Replaces the success value with a constant, preserving failures and
    * requirements.
    *
@@ -2804,6 +2836,788 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
         },
         (a, cause) => f(a, Cause.wrap(cause)).effect
       )
+    );
+  }
+
+  // --- Error handling ---
+
+  /**
+   * Handles all recoverable errors in this effect by providing a fallback
+   * effect, so the program continues without failing. Unrecoverable defects
+   * are not caught.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("boom").catch((error) =>
+   *   Effect.succeed(`recovered from ${error}`)
+   * )
+   * // yields "recovered from boom"
+   * ```
+   *
+   * @see {@link catchCause} for a version that can also recover from defects.
+   */
+  catch<B, E2, R2>(f: (e: E) => Effect<B, E2, R2>): Effect<A | B, E2, R | R2> {
+    return new Effect(_Effect.catch(this._effect, (e) => f(e).effect));
+  }
+
+  /**
+   * Handles both recoverable and unrecoverable errors by providing a recovery
+   * effect that receives the full fluent `Cause` — typed failures, defects,
+   * and interruptions alike.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const recovered = Effect.die("Something went wrong").catchCause((cause) =>
+   *   cause.hasDies ? Effect.succeed("Recovered from defect") : Effect.succeed("Unknown error")
+   * )
+   * ```
+   */
+  catchCause<B, E2, R2>(f: (cause: Cause<E>) => Effect<B, E2, R2>): Effect<A | B, E2, R | R2> {
+    return new Effect(_Effect.catchCause(this._effect, (cause) => f(Cause.wrap(cause)).effect));
+  }
+
+  /**
+   * Recovers only from causes selected by a filter. The filter receives the
+   * fluent `Cause` and returns a fluent `Result`: succeed to recover (the
+   * handler receives the selected value and the original cause), or fail with
+   * a residual cause to re-fail with it.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Result } from "effect-fluent"
+   *
+   * const program = Effect.die(new Error("Boom")).catchCauseFilter(
+   *   (cause) => (cause.hasDies ? Result.succeed(cause) : Result.fail(cause)),
+   *   (selected) => Effect.succeed(`recovered: ${selected.squash}`)
+   * )
+   * ```
+   *
+   * @see {@link catchCauseIf} for predicate-based cause selection.
+   * @see {@link catchFilter} for filtering typed error values instead of full causes.
+   */
+  catchCauseFilter<B, E2, R2, EB, X extends Cause<any>>(
+    filter: (cause: Cause<E>) => Result<EB, X>,
+    f: (failure: EB, cause: Cause<E>) => Effect<B, E2, R2>
+  ): Effect<A | B, Cause.Error<X> | E2, R | R2> {
+    return new Effect(
+      _Effect.catchCauseFilter(
+        this._effect,
+        (cause): _Result.Result<EB, _Cause.Cause<Cause.Error<X>>> => {
+          const result = filter(Cause.wrap(cause));
+          return result.isFailure()
+            ? _Result.fail(result.failure.cause)
+            : // The fail side of a success Result is phantom; retype it from the
+              // fluent X to never so it satisfies core catchCauseFilter's
+              // core-Cause constraint.
+              (result.result as _Result.Result<EB, never>);
+        },
+        (failure, cause) => f(failure, Cause.wrap(cause)).effect
+      )
+    );
+  }
+
+  /**
+   * Recovers from failures whose fluent `Cause` satisfies the given
+   * predicate; other causes are re-failed unchanged.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Network Error").catchCauseIf(
+   *   (cause) => cause.hasFails,
+   *   (cause) => Effect.succeed(`Caught: ${cause.squash}`)
+   * )
+   * // yields "Caught: Network Error"
+   * ```
+   */
+  catchCauseIf<B, E2, R2>(
+    predicate: (cause: Cause<E>) => boolean,
+    f: (cause: Cause<E>) => Effect<B, E2, R2>
+  ): Effect<A | B, E | E2, R | R2> {
+    return new Effect(
+      _Effect.catchCauseIf(
+        this._effect,
+        (cause) => predicate(Cause.wrap(cause)),
+        (cause) => f(Cause.wrap(cause)).effect
+      )
+    );
+  }
+
+  /**
+   * Recovers from defects — unexpected errors such as thrown exceptions or
+   * values passed to `die` — without catching typed failures or
+   * interruptions.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.die(new Error("Boom")).catchDefect((defect) =>
+   *   Effect.succeed(`Caught defect: ${defect}`)
+   * )
+   * ```
+   */
+  catchDefect<B, E2, R2>(f: (defect: unknown) => Effect<B, E2, R2>): Effect<A | B, E | E2, R | R2> {
+    return new Effect(_Effect.catchDefect(this._effect, (defect) => f(defect).effect));
+  }
+
+  /**
+   * Recovers from typed errors selected by a filter. The filter receives the
+   * error and returns a fluent `Result`: succeed to pass the (possibly
+   * narrowed or transformed) value to the handler, or fail to skip recovery —
+   * the fail-side value goes to `orElse` when provided, otherwise the effect
+   * re-fails with its original cause and the fail-side type flows into the
+   * error channel.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Result } from "effect-fluent"
+   *
+   * const program = Effect.fail(404).catchFilter(
+   *   (status) => (status === 404 ? Result.succeed(status) : Result.fail(status)),
+   *   (status) => Effect.succeed(`missing: ${status}`)
+   * )
+   * // yields "missing: 404"
+   * ```
+   *
+   * @see {@link catchIf} for predicate-based recovery from typed errors.
+   * @see {@link catchCauseFilter} for filtering full causes instead of typed errors.
+   */
+  catchFilter<EB, A2, E2, R2, X, A3 = unassigned, E3 = never, R3 = never>(
+    filter: (e: E) => Result<EB, X>,
+    f: (e: EB) => Effect<A2, E2, R2>,
+    orElse?: ((e: X) => Effect<A3, E3, R3>) | undefined
+  ): Effect<A | A2 | Exclude<A3, unassigned>, E2 | E3 | (A3 extends unassigned ? X : never), R | R2 | R3>;
+  catchFilter(
+    filter: (e: any) => Result<any, any>,
+    f: (e: any) => Effect<any, any, any>,
+    orElse?: (e: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    return new Effect(
+      (_Effect.catchFilter as any)(
+        this._effect,
+        (e: any) => filter(e).result,
+        (e: any) => f(e).effect,
+        orElse === undefined ? undefined : (e: any) => orElse(e).effect
+      )
+    );
+  }
+
+  /**
+   * Recovers from errors that match a `Refinement` or `Predicate`.
+   * Non-matching errors go to `orElse` when provided, otherwise they re-fail
+   * with the original cause. Defects and interruptions are not caught.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * class NotFound {
+   *   readonly _tag = "NotFound"
+   * }
+   * class Timeout {
+   *   readonly _tag = "Timeout"
+   * }
+   *
+   * declare const program: Effect<string, NotFound | Timeout>
+   *
+   * const recovered = program.catchIf(
+   *   (error): error is NotFound => error._tag === "NotFound",
+   *   () => Effect.succeed("missing")
+   * )
+   * ```
+   */
+  catchIf<EB extends E, A2, E2, R2, A3 = unassigned, E3 = never, R3 = never>(
+    refinement: Refinement<E, EB>,
+    f: (e: EB) => Effect<A2, E2, R2>,
+    orElse?: ((e: Exclude<E, EB>) => Effect<A3, E3, R3>) | undefined
+  ): Effect<
+    A | A2 | Exclude<A3, unassigned>,
+    E2 | E3 | (A3 extends unassigned ? Exclude<E, EB> : never),
+    R | R2 | R3
+  >;
+  catchIf<A2, E2, R2, A3 = unassigned, E3 = never, R3 = never>(
+    predicate: Predicate<E>,
+    f: (e: E) => Effect<A2, E2, R2>,
+    orElse?: ((e: E) => Effect<A3, E3, R3>) | undefined
+  ): Effect<A | A2 | Exclude<A3, unassigned>, E2 | E3 | (A3 extends unassigned ? E : never), R | R2 | R3>;
+  catchIf(
+    predicate: Predicate<any>,
+    f: (e: any) => Effect<any, any, any>,
+    orElse?: (e: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    return new Effect(
+      (_Effect.catchIf as any)(
+        this._effect,
+        predicate,
+        (e: any) => f(e).effect,
+        orElse === undefined ? undefined : (e: any) => orElse(e).effect
+      )
+    );
+  }
+
+  /**
+   * Catches `NoSuchElementError` failures and converts them to
+   * `Option.none()`. Success values become `Option.some` and all other errors
+   * are preserved.
+   *
+   * @example
+   * ```ts
+   * import { Effect, Option } from "effect-fluent"
+   *
+   * const some = Effect.fromOption(Option.some(1)).catchNoSuchElement
+   * // yields Option.some(1)
+   *
+   * const none = Effect.fromOption(Option.none()).catchNoSuchElement
+   * // yields Option.none()
+   * ```
+   */
+  get catchNoSuchElement(): Effect<Option<A>, Exclude<E, Cause.NoSuchElementError>, R> {
+    return new Effect(_Effect.catchNoSuchElement(this._effect)).map(Option.wrap);
+  }
+
+  /**
+   * Catches a specific reason nested within a tagged error, identified by the
+   * parent error's `_tag` and the reason's `_tag`. The handler receives the
+   * unwrapped reason and the parent error; unmatched reasons go to `orElse`
+   * when provided, otherwise the parent error is preserved.
+   *
+   * @example
+   * ```ts
+   * import { Data } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * class RateLimitError extends Data.TaggedError("RateLimitError")<{
+   *   retryAfter: number
+   * }> {}
+   *
+   * class AiError extends Data.TaggedError("AiError")<{
+   *   reason: RateLimitError
+   * }> {}
+   *
+   * const handled = Effect.fail(
+   *   new AiError({ reason: new RateLimitError({ retryAfter: 60 }) })
+   * ).catchReason("AiError", "RateLimitError", (reason) =>
+   *   Effect.succeed(`Retry after ${reason.retryAfter}s`)
+   * )
+   * ```
+   *
+   * @see {@link catchReasons} for handling several nested reason tags.
+   */
+  catchReason<
+    K extends Tags<E>,
+    RK extends ReasonTags<ExtractTag<E, K>>,
+    A2,
+    E2,
+    R2,
+    A3 = unassigned,
+    E3 = never,
+    R3 = never
+  >(
+    errorTag: K,
+    reasonTag: RK,
+    f: (
+      reason: ExtractReason<ExtractTag<E, K>, RK>,
+      error: NarrowReason<ExtractTag<E, K>, RK>
+    ) => Effect<A2, E2, R2>,
+    orElse?:
+      | ((
+          reasons: ExcludeReason<ExtractTag<E, K>, RK>,
+          error: OmitReason<ExtractTag<E, K>, RK>
+        ) => Effect<A3, E3, R3>)
+      | undefined
+  ): Effect<
+    A | A2 | Exclude<A3, unassigned>,
+    ExcludeTag<E, K> | E2 | E3 | (A3 extends unassigned ? ExtractTag<E, K> : never),
+    R | R2 | R3
+  >;
+  catchReason(
+    errorTag: string,
+    reasonTag: string,
+    f: (reason: any, error: any) => Effect<any, any, any>,
+    orElse?: (reasons: any, error: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    return new Effect(
+      (_Effect.catchReason as any)(
+        this._effect,
+        errorTag,
+        reasonTag,
+        (reason: any, error: any) => f(reason, error).effect,
+        orElse === undefined ? undefined : (reasons: any, error: any) => orElse(reasons, error).effect
+      )
+    );
+  }
+
+  /**
+   * Catches multiple reasons nested within a tagged error using an object of
+   * handlers keyed by reason `_tag`. Each handler receives the unwrapped
+   * reason and the parent error; unmatched reasons go to `orElse` when
+   * provided, otherwise the parent error is preserved.
+   *
+   * @example
+   * ```ts
+   * import { Data } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * class RateLimitError extends Data.TaggedError("RateLimitError")<{
+   *   retryAfter: number
+   * }> {}
+   *
+   * class QuotaExceededError extends Data.TaggedError("QuotaExceededError")<{
+   *   limit: number
+   * }> {}
+   *
+   * class AiError extends Data.TaggedError("AiError")<{
+   *   reason: RateLimitError | QuotaExceededError
+   * }> {}
+   *
+   * const handled = Effect.fail(
+   *   new AiError({ reason: new RateLimitError({ retryAfter: 60 }) })
+   * ).catchReasons("AiError", {
+   *   RateLimitError: (reason) => Effect.succeed(`Retry after ${reason.retryAfter}s`),
+   *   QuotaExceededError: (reason) => Effect.succeed(`Quota exceeded: ${reason.limit}`)
+   * })
+   * ```
+   */
+  catchReasons<
+    K extends Tags<E>,
+    Cases extends {
+      [RK in ReasonTags<ExtractTag<E, K>>]+?: (
+        reason: ExtractReason<ExtractTag<E, K>, RK>,
+        error: NarrowReason<ExtractTag<E, K>, RK>
+      ) => Effect<any, any, any>;
+    },
+    A2 = unassigned,
+    E2 = never,
+    R2 = never
+  >(
+    errorTag: K,
+    cases: Cases,
+    orElse?:
+      | ((
+          reason: ExcludeReason<ExtractTag<E, K>, Extract<keyof Cases, string>>,
+          error: OmitReason<ExtractTag<E, K>, Extract<keyof Cases, string>>
+        ) => Effect<A2, E2, R2>)
+      | undefined
+  ): Effect<
+    | A
+    | Exclude<A2, unassigned>
+    | {
+        [RK in keyof Cases]: Cases[RK] extends (...args: Array<any>) => Effect<infer A1, any, any> ? A1 : never;
+      }[keyof Cases],
+    | ExcludeTag<E, K>
+    | E2
+    | (A2 extends unassigned ? ExtractTag<E, K> : never)
+    | {
+        [RK in keyof Cases]: Cases[RK] extends (...args: Array<any>) => Effect<any, infer E1, any> ? E1 : never;
+      }[keyof Cases],
+    | R
+    | R2
+    | {
+        [RK in keyof Cases]: Cases[RK] extends (...args: Array<any>) => Effect<any, any, infer R1> ? R1 : never;
+      }[keyof Cases]
+  >;
+  catchReasons(
+    errorTag: string,
+    cases: Record<string, ((reason: any, error: any) => Effect<any, any, any>) | undefined>,
+    orElse?: (reason: any, error: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    const adapted: Record<string, ((reason: any, error: any) => _Effect.Effect<any, any, any>) | undefined> = {};
+    for (const key of Object.keys(cases)) {
+      const handler = cases[key];
+      adapted[key] = handler === undefined ? undefined : (reason, error) => handler(reason, error).effect;
+    }
+    return new Effect(
+      (_Effect.catchReasons as any)(
+        this._effect,
+        errorTag,
+        adapted,
+        orElse === undefined ? undefined : (reason: any, error: any) => orElse(reason, error).effect
+      )
+    );
+  }
+
+  /**
+   * Catches and handles errors by their `_tag` discriminator field. Accepts a
+   * single tag or a non-empty array of tags, plus an optional `orElse` for
+   * errors with other tags — without it, unmatched errors are preserved.
+   *
+   * @example
+   * ```ts
+   * import { Data } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * class NetworkError extends Data.TaggedError("NetworkError")<{ message: string }> {}
+   * class ValidationError extends Data.TaggedError("ValidationError")<{ message: string }> {}
+   *
+   * declare const task: Effect<string, NetworkError | ValidationError>
+   *
+   * const recovered = task.catchTag("NetworkError", (error) =>
+   *   Effect.succeed(`Recovered from network error: ${error.message}`)
+   * )
+   * ```
+   *
+   * @see {@link catchTags} for handling multiple tagged errors in one call.
+   * @see {@link catchIf} for recovering from errors that match a predicate.
+   */
+  catchTag<
+    const K extends Tags<E> | NonEmptyReadonlyArray<Tags<E>>,
+    A1,
+    E1,
+    R1,
+    A2 = unassigned,
+    E2 = never,
+    R2 = never
+  >(
+    k: K,
+    f: (e: ExtractTag<E, K extends NonEmptyReadonlyArray<string> ? K[number] : K>) => Effect<A1, E1, R1>,
+    orElse?:
+      | ((e: ExcludeTag<E, K extends NonEmptyReadonlyArray<string> ? K[number] : K>) => Effect<A2, E2, R2>)
+      | undefined
+  ): Effect<
+    A | A1 | Exclude<A2, unassigned>,
+    | E1
+    | E2
+    | (A2 extends unassigned ? ExcludeTag<E, K extends NonEmptyReadonlyArray<string> ? K[number] : K> : never),
+    R | R1 | R2
+  >;
+  catchTag(
+    k: string | NonEmptyReadonlyArray<string>,
+    f: (e: any) => Effect<any, any, any>,
+    orElse?: (e: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    return new Effect(
+      (_Effect.catchTag as any)(
+        this._effect,
+        k,
+        (e: any) => f(e).effect,
+        orElse === undefined ? undefined : (e: any) => orElse(e).effect
+      )
+    );
+  }
+
+  /**
+   * Handles multiple tagged errors in a single call using an object of
+   * handlers keyed by `_tag`, plus an optional `orElse` for unmatched errors —
+   * without it, unmatched errors are preserved.
+   *
+   * @example
+   * ```ts
+   * import { Data } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * class ValidationError extends Data.TaggedError("ValidationError")<{ message: string }> {}
+   * class NetworkError extends Data.TaggedError("NetworkError")<{ statusCode: number }> {}
+   *
+   * declare const program: Effect<string, ValidationError | NetworkError>
+   *
+   * const handled = program.catchTags({
+   *   ValidationError: (error) => Effect.succeed(`Validation failed: ${error.message}`),
+   *   NetworkError: (error) => Effect.succeed(`Network error: ${error.statusCode}`)
+   * })
+   * ```
+   */
+  catchTags<
+    Cases extends {
+      [K in Extract<E, { _tag: string }>['_tag']]+?: (error: Extract<E, { _tag: K }>) => Effect<any, any, any>;
+    } & (unknown extends E ? {} : { [K in Exclude<keyof Cases, Extract<E, { _tag: string }>['_tag']>]: never }),
+    A2 = unassigned,
+    E2 = never,
+    R2 = never
+  >(
+    cases: Cases,
+    orElse?: ((e: Exclude<E, { _tag: keyof Cases }>) => Effect<A2, E2, R2>) | undefined
+  ): Effect<
+    | A
+    | Exclude<A2, unassigned>
+    | {
+        [K in keyof Cases]: Cases[K] extends (...args: Array<any>) => Effect<infer A1, any, any> ? A1 : never;
+      }[keyof Cases],
+    | E2
+    | (A2 extends unassigned ? Exclude<E, { _tag: keyof Cases }> : never)
+    | {
+        [K in keyof Cases]: Cases[K] extends (...args: Array<any>) => Effect<any, infer E1, any> ? E1 : never;
+      }[keyof Cases],
+    | R
+    | R2
+    | {
+        [K in keyof Cases]: Cases[K] extends (...args: Array<any>) => Effect<any, any, infer R1> ? R1 : never;
+      }[keyof Cases]
+  >;
+  catchTags(
+    cases: Record<string, ((e: any) => Effect<any, any, any>) | undefined>,
+    orElse?: (e: any) => Effect<any, any, any>
+  ): Effect<any, any, any> {
+    const adapted: Record<string, ((e: any) => _Effect.Effect<any, any, any>) | undefined> = {};
+    for (const key of Object.keys(cases)) {
+      const handler = cases[key];
+      adapted[key] = handler === undefined ? undefined : (e) => handler(e).effect;
+    }
+    return new Effect(
+      (_Effect.catchTags as any)(
+        this._effect,
+        adapted,
+        orElse === undefined ? undefined : (e: any) => orElse(e).effect
+      )
+    );
+  }
+
+  /**
+   * Discards both the success and failure values of this effect. Use the
+   * `log` option to emit the full cause when the effect fails, and `message`
+   * to prepend a custom log message. Defects and interruptions are not
+   * swallowed — use {@link ignoreCause} for that.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Uh oh!").ignore() // Effect<void>
+   *
+   * const logged = Effect.fail("Uh oh!").ignore({ log: "Warn", message: "Ignoring task failure" })
+   * ```
+   */
+  ignore(options?: {
+    readonly log?: boolean | Severity | undefined;
+    readonly message?: string | undefined;
+  }): Effect<void, never, R> {
+    return new Effect(_Effect.ignore(this._effect, options));
+  }
+
+  /**
+   * Ignores the effect's entire failure cause, including defects and
+   * interruptions, so the effect never fails. Use the `log` option to emit
+   * the full cause when the effect fails, and `message` to prepend a custom
+   * log message.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.die("boom").ignoreCause() // Effect<void>
+   *
+   * const logged = Effect.fail("boom").ignoreCause({ log: true, message: "Ignoring failure cause" })
+   * ```
+   */
+  ignoreCause(options?: {
+    readonly log?: boolean | Severity | undefined;
+    readonly message?: string | undefined;
+  }): Effect<void, never, R> {
+    return new Effect(_Effect.ignoreCause(this._effect, options));
+  }
+
+  /**
+   * Converts typed failures into defects, removing the error type from the
+   * effect. Use this when a typed failure represents an unrecoverable bug or
+   * invalid state.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const divide = (a: number, b: number) =>
+   *   b === 0 ? Effect.fail(new Error("Cannot divide by zero")) : Effect.succeed(a / b)
+   *
+   * const program = divide(1, 0).orDie // Effect<number> — dies instead of failing
+   * ```
+   */
+  get orDie(): Effect<A, never, R> {
+    return new Effect(_Effect.orDie(this._effect));
+  }
+
+  /**
+   * Exposes this effect's full failure cause in the error channel as a fluent
+   * `Cause<E>`, so downstream error handling can distinguish typed failures,
+   * defects, and interruptions.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.gen(function* () {
+   *   const cause = yield* Effect.fail("Something went wrong").sandbox.flip
+   *   return `Caught cause: ${cause.squash}`
+   * })
+   * ```
+   *
+   * @see {@link unwrapReason} for promoting nested reason errors instead.
+   */
+  get sandbox(): Effect<A, Cause<E>, R> {
+    return new Effect(_Effect.mapError(_Effect.sandbox(this._effect), Cause.wrap));
+  }
+
+  /**
+   * Promotes the nested reason errors of a tagged error into the error
+   * channel, replacing the parent error.
+   *
+   * @example
+   * ```ts
+   * import { Data } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * class RateLimitError extends Data.TaggedError("RateLimitError")<{
+   *   retryAfter: number
+   * }> {}
+   *
+   * class AiError extends Data.TaggedError("AiError")<{
+   *   reason: RateLimitError
+   * }> {}
+   *
+   * declare const program: Effect<string, AiError>
+   *
+   * // Before: Effect<string, AiError>
+   * // After:  Effect<string, RateLimitError>
+   * const unwrapped = program.unwrapReason("AiError")
+   * ```
+   */
+  unwrapReason<K extends _Effect.TagsWithReason<E>>(
+    errorTag: K
+  ): Effect<A, ExcludeTag<E, K> | ReasonOf<ExtractTag<E, K>>, R> {
+    return new Effect(_Effect.unwrapReason(this._effect, errorTag));
+  }
+
+  /**
+   * Runs this effect and reports any errors to the configured
+   * `ErrorReporter`s, preserving the original outcome. If `defectsOnly` is
+   * `true`, only defects are reported and typed failures are ignored.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const reported = Effect.fail(new Error("boom")).withErrorReporting()
+   *
+   * const defectsOnly = Effect.die(new Error("boom")).withErrorReporting({ defectsOnly: true })
+   * ```
+   */
+  withErrorReporting(options?: { readonly defectsOnly?: boolean | undefined }): Effect<A, E, R> {
+    return new Effect(_Effect.withErrorReporting(this._effect, options));
+  }
+
+  // --- Pattern matching ---
+
+  /**
+   * Handles both outcomes with pure functions: `onFailure` receives the typed
+   * error and `onSuccess` receives the value. The resulting effect never
+   * fails with a typed error; defects are not handled.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.succeed(42).match({
+   *   onFailure: (error) => `failure: ${error}`,
+   *   onSuccess: (value) => `success: ${value}`
+   * })
+   * // yields "success: 42"
+   * ```
+   *
+   * @see {@link matchEffect} if you need to perform side effects in the handlers.
+   */
+  match<A2, A3>(options: {
+    readonly onFailure: (error: E) => A2;
+    readonly onSuccess: (value: A) => A3;
+  }): Effect<A2 | A3, never, R> {
+    return new Effect(_Effect.match(this._effect, options));
+  }
+
+  /**
+   * Handles both outcomes with effectful handlers: `onFailure` receives the
+   * typed error and `onSuccess` receives the value, each returning a new
+   * `Effect`. The result succeeds or fails according to the handler that ran.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Uh oh!").matchEffect({
+   *   onFailure: (error) => Effect.succeed(`failure: ${error}`),
+   *   onSuccess: (value) => Effect.succeed(`success: ${value}`)
+   * })
+   * // yields "failure: Uh oh!"
+   * ```
+   *
+   * @see {@link match} if you don't need side effects in the handlers.
+   * @see {@link matchCauseEffect} if you need to handle the full cause of the failure.
+   */
+  matchEffect<A2, E2, R2, A3, E3, R3>(options: {
+    readonly onFailure: (e: E) => Effect<A2, E2, R2>;
+    readonly onSuccess: (a: A) => Effect<A3, E3, R3>;
+  }): Effect<A2 | A3, E2 | E3, R | R2 | R3> {
+    return new Effect(
+      _Effect.matchEffect(this._effect, {
+        onFailure: (e) => options.onFailure(e).effect,
+        onSuccess: (a) => options.onSuccess(a).effect
+      })
+    );
+  }
+
+  /**
+   * Handles both outcomes with pure functions, where `onFailure` receives the
+   * full fluent `Cause` — allowing typed failures, defects, and interruptions
+   * to be distinguished.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Something went wrong").matchCause({
+   *   onFailure: (cause) => `Failed: ${cause.squash}`,
+   *   onSuccess: (value) => `Success: ${value}`
+   * })
+   * // yields "Failed: Something went wrong"
+   * ```
+   *
+   * @see {@link matchCauseEffect} if you need to perform side effects in the handlers.
+   * @see {@link match} if you don't need to handle the cause of the failure.
+   */
+  matchCause<A2, A3>(options: {
+    readonly onFailure: (cause: Cause<E>) => A2;
+    readonly onSuccess: (a: A) => A3;
+  }): Effect<A2 | A3, never, R> {
+    return new Effect(
+      _Effect.matchCause(this._effect, {
+        onFailure: (cause) => options.onFailure(Cause.wrap(cause)),
+        onSuccess: options.onSuccess
+      })
+    );
+  }
+
+  /**
+   * Handles both outcomes with effectful handlers, where `onFailure` receives
+   * the full fluent `Cause` — allowing typed failures, defects, and
+   * interruptions to be distinguished while performing side effects.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const program = Effect.fail("Task failed").matchCauseEffect({
+   *   onFailure: (cause) =>
+   *     cause.hasFails
+   *       ? Effect.succeed("recovered from error")
+   *       : Effect.succeed("recovered from defect"),
+   *   onSuccess: (value) => Effect.succeed(`processed ${value}`)
+   * })
+   * ```
+   *
+   * @see {@link matchCause} if you don't need side effects in the handlers.
+   * @see {@link matchEffect} if you don't need to handle the cause of the failure.
+   */
+  matchCauseEffect<A2, E2, R2, A3, E3, R3>(options: {
+    readonly onFailure: (cause: Cause<E>) => Effect<A2, E2, R2>;
+    readonly onSuccess: (a: A) => Effect<A3, E3, R3>;
+  }): Effect<A2 | A3, E2 | E3, R | R2 | R3> {
+    return new Effect(
+      _Effect.matchCauseEffect(this._effect, {
+        onFailure: (cause) => options.onFailure(Cause.wrap(cause)).effect,
+        onSuccess: (a) => options.onSuccess(a).effect
+      })
     );
   }
 

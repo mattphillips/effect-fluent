@@ -8,7 +8,7 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Mapping & sequencing
 
-- [ ] `mapError`
+- [x] `mapError`
 - [ ] `zip`
 - [ ] `zipWith`
 - [ ] `flatten` (instance getter — we only have the static)
@@ -27,26 +27,26 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Error handling
 
-- [ ] `catch` (exported as `catch_ as catch`)
-- [ ] `catchCause`
-- [ ] `catchCauseFilter`
-- [ ] `catchCauseIf`
-- [ ] `catchDefect`
-- [ ] `catchFilter`
-- [ ] `catchIf`
-- [ ] `catchNoSuchElement`
-- [ ] `catchReason`
-- [ ] `catchReasons`
-- [ ] `catchTag`
-- [ ] `catchTags`
-- [ ] `ignore`
-- [ ] `ignoreCause`
+- [x] `catch` (exported as `catch_ as catch`)
+- [x] `catchCause`
+- [x] `catchCauseFilter`
+- [x] `catchCauseIf`
+- [x] `catchDefect`
+- [x] `catchFilter`
+- [x] `catchIf`
+- [x] `catchNoSuchElement`
+- [x] `catchReason`
+- [x] `catchReasons`
+- [x] `catchTag`
+- [x] `catchTags`
+- [x] `ignore`
+- [x] `ignoreCause`
 - [x] `retry`
 - [x] `retryOrElse`
-- [ ] `sandbox`
-- [ ] `unwrapReason`
-- [ ] `withErrorReporting`
-- [ ] `orDie`
+- [x] `sandbox`
+- [x] `unwrapReason`
+- [x] `withErrorReporting`
+- [x] `orDie`
 
 ## Fallback
 
@@ -56,10 +56,10 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Pattern matching
 
-- [ ] `match`
-- [ ] `matchEffect`
-- [ ] `matchCause`
-- [ ] `matchCauseEffect`
+- [x] `match`
+- [x] `matchEffect`
+- [x] `matchCause`
+- [x] `matchCauseEffect`
 
 ## Filtering
 
