@@ -42,7 +42,7 @@ describe('Config', () => {
     const program = Effect.gen(function* () {
       return yield* Config.schema(Schema.Struct({ STRING: Schema.String }));
     });
-    const result = _Effect.runSync(program.with((core) => _Effect.provide(core, ConfigProvider.layer(provider))).effect);
+    const result = program.provide(ConfigProvider.layer(provider)).runSync();
     deepStrictEqual(result, { STRING: 'value' });
   });
 

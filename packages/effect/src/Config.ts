@@ -49,7 +49,9 @@ export type ConfigTypeId = typeof ConfigTypeId;
  *   const value = yield* port
  *   console.log(value)
  * })
- * // provide a ConfigProvider layer and run to read the config
+ *
+ * const provider = ConfigProvider.fromUnknown({ PORT: "8081" })
+ * program.provide(ConfigProvider.layer(provider)).runSync() // logs 8081
  * ```
  */
 export class Config<out T> extends Inspectable implements _Effect.Effect<T, _Config.ConfigError> {
@@ -303,7 +305,10 @@ export class Config<out T> extends Inspectable implements _Effect.Effect<T, _Con
    * const env = Config.literals(["development", "production"], "ENV")
    * ```
    */
-  static literals<const L extends ReadonlyArray<SchemaAST.LiteralValue>>(literals: L, name?: string): Config<L[number]> {
+  static literals<const L extends ReadonlyArray<SchemaAST.LiteralValue>>(
+    literals: L,
+    name?: string
+  ): Config<L[number]> {
     return new Config(_Config.literals(literals, name));
   }
 
@@ -493,9 +498,7 @@ export class Config<out T> extends Inspectable implements _Effect.Effect<T, _Con
       ? arg.map((config: Config<any>) => config.config)
       : Symbol.iterator in arg
         ? Array.from(arg as Iterable<Config<any>>, (config) => config.config)
-        : Object.fromEntries(
-            Object.entries(arg).map(([key, config]) => [key, (config as Config<any>).config])
-          );
+        : Object.fromEntries(Object.entries(arg).map(([key, config]) => [key, (config as Config<any>).config]));
     return new Config(_Config.all(coreArg as any)) as any;
   }
 
@@ -845,7 +848,9 @@ export class Config<out T> extends Inspectable implements _Effect.Effect<T, _Con
 const unwrapWrap = (wrapped: unknown): unknown =>
   Config.is(wrapped)
     ? wrapped.config
-    : Object.fromEntries(Object.entries(wrapped as Record<string, unknown>).map(([key, value]) => [key, unwrapWrap(value)]));
+    : Object.fromEntries(
+        Object.entries(wrapped as Record<string, unknown>).map(([key, value]) => [key, unwrapWrap(value)])
+      );
 
 type Self<A> = Config<A>;
 

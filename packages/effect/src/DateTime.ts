@@ -2095,18 +2095,17 @@ const dateTimeWithCurrentZoneNamed: {
  * Creates a core `Layer` providing the `CurrentTimeZone` service from the
  * given core `TimeZone`.
  *
- * Layers are core values — effect-fluent has no fluent `Layer` wrapper —
- * so provide them through core `Effect` APIs.
+ * Layers are core values — effect-fluent has no fluent `Layer` wrapper yet —
+ * and the fluent `Effect.provide` accepts them directly.
  *
  * @example
  * ```ts
- * import { DateTime, Effect } from "effect-fluent"
- * import { Effect as CoreEffect } from "effect"
+ * import { DateTime } from "effect-fluent"
  *
  * const layer = DateTime.layerCurrentZone(DateTime.zoneMakeNamedUnsafe("Europe/London"))
  *
  * const program = DateTime.nowInCurrentZone.map((now) => now.formatIsoZoned)
- * const provided = Effect.wrap(CoreEffect.provide(program.effect, layer))
+ * const provided = program.provide(layer)
  * ```
  */
 const dateTimeLayerCurrentZone = (zone: _DateTime.TimeZone): Layer.Layer<_DateTime.CurrentTimeZone> =>
@@ -2116,18 +2115,17 @@ const dateTimeLayerCurrentZone = (zone: _DateTime.TimeZone): Layer.Layer<_DateTi
  * Creates a core `Layer` providing the `CurrentTimeZone` service from a fixed
  * offset in milliseconds from UTC.
  *
- * Layers are core values — effect-fluent has no fluent `Layer` wrapper —
- * so provide them through core `Effect` APIs.
+ * Layers are core values — effect-fluent has no fluent `Layer` wrapper yet —
+ * and the fluent `Effect.provide` accepts them directly.
  *
  * @example
  * ```ts
- * import { DateTime, Effect } from "effect-fluent"
- * import { Effect as CoreEffect } from "effect"
+ * import { DateTime } from "effect-fluent"
  *
  * const layer = DateTime.layerCurrentZoneOffset(3 * 60 * 60 * 1000)
  *
  * const program = DateTime.nowInCurrentZone.map((now) => now.formatIsoZoned)
- * const provided = Effect.wrap(CoreEffect.provide(program.effect, layer))
+ * const provided = program.provide(layer)
  * ```
  */
 const dateTimeLayerCurrentZoneOffset = (offset: number): Layer.Layer<_DateTime.CurrentTimeZone> =>
@@ -2138,18 +2136,17 @@ const dateTimeLayerCurrentZoneOffset = (offset: number): Layer.Layer<_DateTime.C
  * time zone identifier. The layer fails with an `IllegalArgumentError` when
  * the identifier is invalid.
  *
- * Layers are core values — effect-fluent has no fluent `Layer` wrapper —
- * so provide them through core `Effect` APIs.
+ * Layers are core values — effect-fluent has no fluent `Layer` wrapper yet —
+ * and the fluent `Effect.provide` accepts them directly.
  *
  * @example
  * ```ts
- * import { DateTime, Effect } from "effect-fluent"
- * import { Effect as CoreEffect } from "effect"
+ * import { DateTime } from "effect-fluent"
  *
  * const layer = DateTime.layerCurrentZoneNamed("Europe/London")
  *
  * const program = DateTime.nowInCurrentZone.map((now) => now.formatIsoZoned)
- * const provided = Effect.wrap(CoreEffect.provide(program.effect, layer))
+ * const provided = program.provide(layer)
  * ```
  */
 const dateTimeLayerCurrentZoneNamed = (
@@ -2160,16 +2157,15 @@ const dateTimeLayerCurrentZoneNamed = (
  * A core `Layer` providing the `CurrentTimeZone` service from the system's
  * configured local time zone.
  *
- * Layers are core values — effect-fluent has no fluent `Layer` wrapper —
- * so provide them through core `Effect` APIs.
+ * Layers are core values — effect-fluent has no fluent `Layer` wrapper yet —
+ * and the fluent `Effect.provide` accepts them directly.
  *
  * @example
  * ```ts
- * import { DateTime, Effect } from "effect-fluent"
- * import { Effect as CoreEffect } from "effect"
+ * import { DateTime } from "effect-fluent"
  *
  * const program = DateTime.nowInCurrentZone.map((now) => now.formatIsoZoned)
- * const provided = Effect.wrap(CoreEffect.provide(program.effect, DateTime.layerCurrentZoneLocal))
+ * const provided = program.provide(DateTime.layerCurrentZoneLocal)
  * ```
  */
 const dateTimeLayerCurrentZoneLocal: Layer.Layer<_DateTime.CurrentTimeZone> = _DateTime.layerCurrentZoneLocal;

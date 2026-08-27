@@ -2462,7 +2462,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
 
   /**
    * The underlying core `Effect`. Use this to hand a fluent Effect to APIs
-   * that operate on core effects.
+   * that operate on core effects — for running, prefer the fluent `run*`
+   * methods instead.
    *
    * @example
    * ```ts
@@ -2471,7 +2472,8 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    *
    * const program = Effect.succeed(1).map((n) => n + 1)
    *
-   * console.log(CoreEffect.runSync(program.effect)) // 2
+   * // hand the core effect to a core-only combinator, then re-wrap
+   * const delayed = Effect.wrap(CoreEffect.delay(program.effect, 1000))
    * ```
    */
   get effect(): _Effect.Effect<A, E, R> {
