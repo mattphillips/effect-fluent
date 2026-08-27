@@ -47,7 +47,11 @@ Criteria:
   - **Sink**, **Take**, **Channel**, **Pull** — Stream plumbing; wrap only the
     parts Stream's own signatures force us to expose.
 - **Layer** — DI graphs are composed by chaining (`provide`, `merge`, `tap`);
-  very app-facing. Medium surface.
+  very app-facing. Medium surface. When it lands: it joins the Effect SCC in
+  `internal/core.ts` (its combinators take/return fluent Effects and
+  `Effect.provide` will need a runtime `Layer.is`), and the Layer task must
+  also widen `Effect.provide` to accept fluent Layers alongside core ones
+  (the Duration → `Effect.sleep` widening pattern, planned this time).
 - **DateTime** — rich, chainable, immutable, highly app-facing.
 - **BigDecimal** — arithmetic chains naturally; self-contained.
 - **Config** — combinator-rich value type (`map`, `orElse`, `zip`, `withDefault`)
