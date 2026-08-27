@@ -1793,12 +1793,14 @@ export type EffectTypeId = typeof EffectTypeId;
  * getters instead of standalone functions.
  *
  * Fluent Effects implement the core `Effect` interface so they can be yielded
- * with `yield*` inside both core and fluent `Effect.gen`. For any other core
- * usage — running, or passing to core combinators — unbox explicitly first:
- * use the {@link Effect.effect | effect} getter to get the underlying core
- * Effect, {@link Effect.wrap | wrap} to lift a core Effect into the fluent
- * class, and {@link Effect.with | with} to apply a core transformation while
- * staying fluent.
+ * with `yield*` inside both core and fluent `Effect.gen`, and they execute
+ * directly through the fluent `run*` methods ({@link Effect.runSync | runSync},
+ * {@link Effect.runPromise | runPromise}, {@link Effect.runFork | runFork},
+ * and friends). For passing to core combinators, unbox explicitly first: use
+ * the {@link Effect.effect | effect} getter to get the underlying core Effect,
+ * {@link Effect.wrap | wrap} to lift a core Effect into the fluent class, and
+ * {@link Effect.with | with} to apply a core transformation while staying
+ * fluent.
  *
  * @example
  * ```ts
@@ -3992,6 +3994,384 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    */
   get option(): Effect<Option<A>, never, R> {
     return new Effect(_Effect.option(this._effect)).map(Option.wrap);
+  }
+
+  // --- Running ---
+  //
+  // Running is execution, not description, so every member below is a method —
+  // never a getter — even when it takes no arguments. The `this` parameter
+  // constrains the receiver to `R = never` (or to the services covered by the
+  // provided `Context` for the `*With` variants), rejecting effects with
+  // unsatisfied requirements at compile time.
+
+  /**
+   * Executes this effect synchronously and returns its success value.
+   *
+   * Use when the effect is guaranteed to complete synchronously. If the effect
+   * fails, dies, or is interrupted, `runSync` throws the squashed cause: the
+   * first typed error as-is, the first defect as-is, or an `Error` for
+   * interruptions. If the effect performs asynchronous work it dies with an
+   * `AsyncFiberError`, which is thrown. Use
+   * {@link Effect.runSyncExit | runSyncExit} when you want the failure
+   * captured as an `Exit` instead.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runSyncWith | runSyncWith} to supply services first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * console.log(Effect.succeed(1).map((n) => n + 1).runSync()) // 2
+   *
+   * try {
+   *   Effect.fail("my error").runSync()
+   * } catch (e) {
+   *   console.error(e) // "my error"
+   * }
+   * ```
+   */
+  runSync<A2, E2>(this: Effect<A2, E2, never>): A2 {
+    return _Effect.runSync(this._effect);
+  }
+
+  /**
+   * Executes this effect synchronously and captures the outcome safely as a
+   * fluent `Exit`, which represents success or failure (including defects and
+   * interruptions).
+   *
+   * If the effect performs asynchronous work, the returned `Exit` is a
+   * `Failure` with a `Die` cause carrying an `AsyncFiberError`, indicating
+   * that the effect cannot be resolved synchronously.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runSyncExitWith | runSyncExitWith} to supply services first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const exit = Effect.fail("my error").runSyncExit()
+   * if (exit.isFailure()) {
+   *   console.log(exit.cause.findErrorOption) // Option.some("my error")
+   * }
+   * ```
+   */
+  runSyncExit<A2, E2>(this: Effect<A2, E2, never>): Exit<A2, E2> {
+    return Exit.wrap(_Effect.runSyncExit(this._effect));
+  }
+
+  /**
+   * Executes this effect synchronously with the provided services and returns
+   * its success value.
+   *
+   * Use when you already have a core `Context` covering this effect's
+   * requirements, the effect is known to complete synchronously, and failures
+   * should throw (with the same semantics as
+   * {@link Effect.runSync | runSync}).
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Math = Context.Service<{ add: (a: number, b: number) => number }>("Math")
+   *
+   * const context = Context.make(Math, { add: (a, b) => a + b })
+   *
+   * const program = Effect.gen(function* () {
+   *   const math = yield* Math
+   *   return math.add(2, 3)
+   * })
+   *
+   * console.log(program.runSyncWith(context)) // 5
+   * ```
+   */
+  runSyncWith<A2, E2, R2>(this: Effect<A2, E2, R2>, context: Context.Context<R2>): A2 {
+    return _Effect.runSyncWith(context)(this._effect);
+  }
+
+  /**
+   * Executes this effect synchronously with the provided services, capturing
+   * the outcome safely as a fluent `Exit` instead of throwing on failure.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Logger = Context.Service<{ log: (msg: string) => void }>("Logger")
+   *
+   * const context = Context.make(Logger, { log: (msg) => console.log(msg) })
+   *
+   * const program = Effect.gen(function* () {
+   *   const logger = yield* Logger
+   *   logger.log("Computing result...")
+   *   return 42
+   * })
+   *
+   * const exit = program.runSyncExitWith(context)
+   * console.log(exit.isSuccess() && exit.value) // 42
+   * ```
+   */
+  runSyncExitWith<A2, E2, R2>(this: Effect<A2, E2, R2>, context: Context.Context<R2>): Exit<A2, E2> {
+    return Exit.wrap(_Effect.runSyncExitWith(context)(this._effect));
+  }
+
+  /**
+   * Executes this effect and returns the result as a `Promise`.
+   *
+   * Use when you need to execute an effect and work with the result using
+   * `Promise` syntax, typically for compatibility with other promise-based
+   * code. If the effect succeeds, the promise resolves with the value; if it
+   * fails, the promise rejects with the squashed cause — the first typed
+   * error as-is, the first defect as-is, or an `Error` for interruptions.
+   * Pass an `AbortSignal` via `options.signal` to interrupt the running
+   * fiber from the outside.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runPromiseWith | runPromiseWith} to supply services first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * Effect.succeed(1).runPromise().then(console.log) // 1
+   *
+   * Effect.fail("my error").runPromise().catch(console.error) // "my error"
+   * ```
+   */
+  runPromise<A2, E2>(this: Effect<A2, E2, never>, options?: _Effect.RunOptions | undefined): Promise<A2> {
+    return _Effect.runPromise(this._effect, options);
+  }
+
+  /**
+   * Executes this effect and returns a `Promise` that always resolves with a
+   * fluent `Exit` describing the outcome — success or failure, including
+   * defects and interruptions — instead of rejecting.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runPromiseExitWith | runPromiseExitWith} to supply services
+   * first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * Effect.fail("my error").runPromiseExit().then((exit) => {
+   *   if (exit.isFailure()) {
+   *     console.log(exit.cause.findErrorOption) // Option.some("my error")
+   *   }
+   * })
+   * ```
+   */
+  runPromiseExit<A2, E2>(this: Effect<A2, E2, never>, options?: _Effect.RunOptions | undefined): Promise<Exit<A2, E2>> {
+    return _Effect.runPromiseExit(this._effect, options).then(Exit.wrap);
+  }
+
+  /**
+   * Executes this effect as a `Promise` with the provided services.
+   *
+   * Use when you already have a core `Context` covering this effect's
+   * requirements and need Promise interop that rejects on failure (with the
+   * same rejection semantics as {@link Effect.runPromise | runPromise}).
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Config = Context.Service<{ apiUrl: string }>("Config")
+   *
+   * const context = Context.make(Config, { apiUrl: "https://api.example.com" })
+   *
+   * const program = Effect.gen(function* () {
+   *   const config = yield* Config
+   *   return `Connecting to ${config.apiUrl}`
+   * })
+   *
+   * program.runPromiseWith(context).then(console.log)
+   * ```
+   */
+  runPromiseWith<A2, E2, R2>(
+    this: Effect<A2, E2, R2>,
+    context: Context.Context<R2>,
+    options?: _Effect.RunOptions | undefined
+  ): Promise<A2> {
+    return _Effect.runPromiseWith(context)(this._effect, options);
+  }
+
+  /**
+   * Executes this effect with the provided services, returning a `Promise`
+   * that always resolves with a fluent `Exit` preserving success and failure.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Database = Context.Service<{ query: (sql: string) => string }>("Database")
+   *
+   * const context = Context.make(Database, { query: (sql) => `Result for: ${sql}` })
+   *
+   * const program = Effect.gen(function* () {
+   *   const db = yield* Database
+   *   return db.query("SELECT * FROM users")
+   * })
+   *
+   * program.runPromiseExitWith(context).then((exit) => {
+   *   if (exit.isSuccess()) {
+   *     console.log("Success:", exit.value)
+   *   }
+   * })
+   * ```
+   */
+  runPromiseExitWith<A2, E2, R2>(
+    this: Effect<A2, E2, R2>,
+    context: Context.Context<R2>,
+    options?: _Effect.RunOptions | undefined
+  ): Promise<Exit<A2, E2>> {
+    return _Effect.runPromiseExitWith(context)(this._effect, options).then(Exit.wrap);
+  }
+
+  /**
+   * Runs this effect in the background, returning a fluent `Fiber` that can
+   * be observed or interrupted.
+   *
+   * Use when you need to start an effect in the background and keep a handle
+   * to it. Pass an `AbortSignal` via `options.signal` to interrupt the fiber
+   * from the outside.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runForkWith | runForkWith} to supply services first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const fiber = Effect.sync(() => console.log("running...")).forever().runFork()
+   *
+   * setTimeout(() => {
+   *   fiber.interrupt.runFork()
+   * }, 500)
+   * ```
+   */
+  runFork<A2, E2>(this: Effect<A2, E2, never>, options?: _Effect.RunOptions | undefined): Fiber<A2, E2> {
+    return Fiber.wrap(_Effect.runFork(this._effect, options));
+  }
+
+  /**
+   * Runs this effect in the background with the provided services, returning
+   * a fluent `Fiber`.
+   *
+   * Use when this effect still requires services, you already have a core
+   * `Context`, and you want a background fiber.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Logger = Context.Service<{ log: (message: string) => void }>("Logger")
+   *
+   * const services = Context.make(Logger, { log: (message) => console.log(message) })
+   *
+   * const program = Effect.gen(function* () {
+   *   const logger = yield* Logger
+   *   logger.log("Hello from service!")
+   *   return "done"
+   * })
+   *
+   * const fiber = program.runForkWith(services)
+   * ```
+   */
+  runForkWith<A2, E2, R2>(
+    this: Effect<A2, E2, R2>,
+    context: Context.Context<R2>,
+    options?: _Effect.RunOptions | undefined
+  ): Fiber<A2, E2> {
+    return Fiber.wrap(_Effect.runForkWith(context)(this._effect, options));
+  }
+
+  /**
+   * Runs this effect asynchronously, registering `onExit` as a fiber observer
+   * and returning an interruptor.
+   *
+   * The `onExit` callback receives the outcome as a fluent `Exit`. The
+   * returned interruptor calls the fiber's `interruptUnsafe`, optionally with
+   * an interruptor fiber ID.
+   *
+   * Only effects with no remaining requirements (`R = never`) can be run; use
+   * {@link Effect.runCallbackWith | runCallbackWith} to supply services first.
+   *
+   * @example
+   * ```ts
+   * import { Effect } from "effect-fluent"
+   *
+   * const interrupt = Effect.succeed("done").runCallback({
+   *   onExit: (exit) => {
+   *     console.log(exit.isSuccess() && exit.value) // "done"
+   *   }
+   * })
+   *
+   * // interrupt() to cancel the fiber if needed
+   * ```
+   */
+  runCallback<A2, E2>(
+    this: Effect<A2, E2, never>,
+    options?: (_Effect.RunOptions & { readonly onExit: (exit: Exit<A2, E2>) => void }) | undefined
+  ): (interruptor?: number | undefined) => void {
+    return _Effect.runCallback(
+      this._effect,
+      options === undefined ? undefined : { ...options, onExit: (exit) => options.onExit(Exit.wrap(exit)) }
+    );
+  }
+
+  /**
+   * Runs this effect with the provided services, registering `onExit` as a
+   * fiber observer and returning an interruptor.
+   *
+   * Use when embedding an effect into callback-style code with explicit
+   * services and a synchronous interruptor. The `onExit` callback receives
+   * the outcome as a fluent `Exit`; the returned interruptor calls the
+   * fiber's `interruptUnsafe`, optionally with an interruptor fiber ID.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Logger = Context.Service<{ log: (message: string) => void }>("Logger")
+   *
+   * const services = Context.make(Logger, { log: (message) => console.log(message) })
+   *
+   * const program = Effect.gen(function* () {
+   *   const logger = yield* Logger
+   *   logger.log("Started")
+   *   return "done"
+   * })
+   *
+   * const interrupt = program.runCallbackWith(services, {
+   *   onExit: (exit) => {
+   *     if (exit.isFailure()) {
+   *       // handle failure or interruption
+   *     }
+   *   }
+   * })
+   *
+   * // Use the interruptor if you need to cancel the fiber later.
+   * interrupt()
+   * ```
+   */
+  runCallbackWith<A2, E2, R2>(
+    this: Effect<A2, E2, R2>,
+    context: Context.Context<R2>,
+    options?: (_Effect.RunOptions & { readonly onExit: (exit: Exit<A2, E2>) => void }) | undefined
+  ): (interruptor?: number | undefined) => void {
+    return _Effect.runCallbackWith(context)(
+      this._effect,
+      options === undefined ? undefined : { ...options, onExit: (exit) => options.onExit(Exit.wrap(exit)) }
+    );
   }
 
   /**

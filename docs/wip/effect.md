@@ -184,18 +184,18 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Running
 
-- [ ] `runSync`
-- [ ] `runSyncExit`
-- [ ] `runSyncWith`
-- [ ] `runSyncExitWith`
-- [ ] `runPromise`
-- [ ] `runPromiseExit`
-- [ ] `runPromiseWith`
-- [ ] `runPromiseExitWith`
-- [ ] `runFork`
-- [ ] `runForkWith`
-- [ ] `runCallback`
-- [ ] `runCallbackWith`
+- [x] `runSync`
+- [x] `runSyncExit`
+- [x] `runSyncWith`
+- [x] `runSyncExitWith`
+- [x] `runPromise`
+- [x] `runPromiseExit`
+- [x] `runPromiseWith`
+- [x] `runPromiseExitWith`
+- [x] `runFork`
+- [x] `runForkWith`
+- [x] `runCallback`
+- [x] `runCallbackWith`
 
 ## Logging
 
