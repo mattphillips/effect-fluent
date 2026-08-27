@@ -10,6 +10,7 @@ import * as _Exit from 'effect/Exit';
 import * as _Fiber from 'effect/Fiber';
 import { dual, identity, type LazyArg } from 'effect/Function';
 import { NodeInspectSymbol } from 'effect/Inspectable';
+import type * as Layer from 'effect/Layer';
 import type { Severity } from 'effect/LogLevel';
 import { Class as PipeableClass } from 'effect/Pipeable';
 import { hasProperty, isFunction, isIterable } from 'effect/Predicate';
@@ -3994,6 +3995,469 @@ export class Effect<A, E = never, R = never> extends PipeableClass implements _E
    */
   get option(): Effect<Option<A>, never, R> {
     return new Effect(_Effect.option(this._effect)).map(Option.wrap);
+  }
+
+  // --- Context / environment ---
+  //
+  // Context, service keys (Context.Key / Service / Reference), and Layer are
+  // core plumbing consumed through Effect — they are never wrapped. Anything
+  // Effect-shaped stays fluent: the environment accessors below return fluent
+  // Effects, `serviceOption` yields the fluent Option, and
+  // `provideServiceEffect` accepts a fluent acquisition Effect.
+
+  /**
+   * An `Effect` that succeeds with the complete `Context` of services
+   * available in the effect's environment. This can be useful for debugging,
+   * introspection, or when you need to pass the entire context to another
+   * function.
+   *
+   * @example
+   * ```ts
+   * import { Context, Option } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Logger = Context.Service<{
+   *   log: (msg: string) => void
+   * }>("Logger")
+   * const Database = Context.Service<{
+   *   query: (sql: string) => string
+   * }>("Database")
+   *
+   * const program = Effect.gen(function* () {
+   *   const allServices = yield* Effect.context()
+   *
+   *   // Check if specific services are available
+   *   const loggerOption = Context.getOption(allServices, Logger)
+   *   const databaseOption = Context.getOption(allServices, Database)
+   *
+   *   console.log(`Logger available: ${Option.isSome(loggerOption)}`)
+   *   console.log(`Database available: ${Option.isSome(databaseOption)}`)
+   * })
+   *
+   * const context = Context.make(Logger, { log: console.log })
+   *   .pipe(Context.add(Database, { query: () => "result" }))
+   *
+   * const provided = program.provideContext(context)
+   * ```
+   *
+   * @see {@link Effect.contextWith | contextWith} for deriving an effect from the complete context
+   * @see {@link Effect.service | service} for reading one service from the context
+   */
+  static context<R = never>(): Effect<Context.Context<R>, never, R> {
+    return new Effect(_Effect.context<R>());
+  }
+
+  /**
+   * Transforms the current context using the provided function.
+   *
+   * **When to use**
+   *
+   * Use to derive an effect from the complete `Context`.
+   *
+   * **Details**
+   *
+   * This function allows you to access the complete context and perform
+   * computations based on all available services. This is useful when you need
+   * to conditionally execute logic based on what services are available.
+   *
+   * @example
+   * ```ts
+   * import { Context, Option } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Cache = Context.Service<{
+   *   get: (key: string) => string | null
+   * }>("Cache")
+   *
+   * const program = Effect.contextWith((services: Context.Context<never>) =>
+   *   Option.isSome(Context.getOption(services, Cache))
+   *     ? Effect.service(Cache).map((cache) => cache.get("user:123") ?? "default")
+   *     : Effect.succeed("fallback data")
+   * )
+   * ```
+   *
+   * @see {@link Effect.context | context} for reading the complete context as a value
+   * @see {@link Effect.service | service} for reading one service from the context
+   */
+  static contextWith<R, A, E, R2>(f: (context: Context.Context<R>) => Effect<A, E, R2>): Effect<A, E, R | R2> {
+    return new Effect(_Effect.contextWith((context: Context.Context<R>) => f(context).effect));
+  }
+
+  /**
+   * Accesses a service from the context.
+   *
+   * The requirement is tracked in the effect's `R` channel until it is
+   * provided. `Context.Reference` keys carry a default value, so accessing
+   * them adds no requirement.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Database = Context.Service<{
+   *   query: (sql: string) => string
+   * }>("Database")
+   *
+   * const program = Effect.gen(function* () {
+   *   const db = yield* Effect.service(Database)
+   *   return db.query("SELECT * FROM users")
+   * })
+   *
+   * const runnable = program.provideService(Database, {
+   *   query: (sql) => `Result for: ${sql}`
+   * })
+   * ```
+   */
+  static service<I, S>(service: Context.Key<I, S>): Effect<S, never, I> {
+    return new Effect(_Effect.service(service));
+  }
+
+  /**
+   * Optionally accesses a service from the environment, as a fluent `Option`.
+   *
+   * **When to use**
+   *
+   * Use to read an optional dependency from the current context without making
+   * that dependency part of the effect's required environment.
+   *
+   * **Details**
+   *
+   * This function attempts to access a service from the environment. If the
+   * service is available, it returns `Option.some(service)`. If the service is
+   * not available, it returns `Option.none()`. Unlike
+   * {@link Effect.service | service}, this function does not require the
+   * service to be present in the environment.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Logger = Context.Service<{
+   *   log: (msg: string) => void
+   * }>("Logger")
+   *
+   * const program = Effect.gen(function* () {
+   *   const maybeLogger = yield* Effect.serviceOption(Logger)
+   *
+   *   if (maybeLogger.isSome()) {
+   *     maybeLogger.value.log("Service is available")
+   *   } else {
+   *     console.log("Service not available")
+   *   }
+   * })
+   * ```
+   */
+  static serviceOption<I, S>(key: Context.Key<I, S>): Effect<Option<S>> {
+    return new Effect(_Effect.serviceOption(key)).map(Option.wrap);
+  }
+
+  /**
+   * Provides dependencies to this effect using layers or a context. Accepts a
+   * single `Layer`, a non-empty array of `Layer`s, or a `Context`. Use
+   * `options.local` to build the layer every time; by default, layers are
+   * shared between provide calls.
+   *
+   * @example
+   * ```ts
+   * import { Context, Layer } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Database = Context.Service<{
+   *   query: (sql: string) => string
+   * }>("Database")
+   *
+   * const DatabaseLive = Layer.succeed(Database, {
+   *   query: (sql) => `Result for: ${sql}`
+   * })
+   *
+   * const program = Effect.gen(function* () {
+   *   const db = yield* Effect.service(Database)
+   *   return db.query("SELECT * FROM users")
+   * })
+   *
+   * program.provide(DatabaseLive).runPromise().then(console.log)
+   * // Output: "Result for: SELECT * FROM users"
+   * ```
+   *
+   * @see {@link provideService} for providing one concrete service implementation.
+   * @see {@link provideContext} for providing a complete context.
+   */
+  provide<const Layers extends [Layer.Any, ...Array<Layer.Any>]>(
+    layers: Layers,
+    options?: { readonly local?: boolean | undefined } | undefined
+  ): Effect<
+    A,
+    E | Layer.Error<Layers[number]>,
+    Layer.Services<Layers[number]> | Exclude<R, Layer.Success<Layers[number]>>
+  >;
+  provide<ROut, E2, RIn>(
+    layer: Layer.Layer<ROut, E2, RIn>,
+    options?: { readonly local?: boolean | undefined } | undefined
+  ): Effect<A, E | E2, RIn | Exclude<R, ROut>>;
+  provide<R2>(context: Context.Context<R2>): Effect<A, E, Exclude<R, R2>>;
+  provide(
+    arg: Layer.Any | ReadonlyArray<Layer.Any> | Context.Context<any>,
+    options?: { readonly local?: boolean | undefined } | undefined
+  ): Effect<any, any, any> {
+    return new Effect(_Effect.provide(this._effect, arg as any, options));
+  }
+
+  /**
+   * Provides a context to this effect, fulfilling its service requirements.
+   *
+   * **Details**
+   *
+   * This function provides multiple services at once by supplying a context
+   * that contains all the required services. It removes the provided services
+   * from the effect's requirements, making them available to the effect.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * // Define service keys
+   * const Logger = Context.Service<{
+   *   log: (msg: string) => void
+   * }>("Logger")
+   * const Database = Context.Service<{
+   *   query: (sql: string) => string
+   * }>("Database")
+   *
+   * // Create a context with multiple services
+   * const context = Context.make(Logger, { log: console.log })
+   *   .pipe(Context.add(Database, { query: () => "result" }))
+   *
+   * // An effect that requires both services
+   * const program = Effect.gen(function* () {
+   *   const logger = yield* Effect.service(Logger)
+   *   const db = yield* Effect.service(Database)
+   *   logger.log("Querying database")
+   *   return db.query("SELECT * FROM users")
+   * })
+   *
+   * const provided = program.provideContext(context)
+   * ```
+   */
+  provideContext<XR>(context: Context.Context<XR>): Effect<A, E, Exclude<R, XR>> {
+    return new Effect(_Effect.provideContext(this._effect, context));
+  }
+
+  /**
+   * Provides one concrete service implementation to this effect.
+   *
+   * **When to use**
+   *
+   * Use to satisfy one service requirement with an already-built implementation.
+   *
+   * **Details**
+   *
+   * The service requirement identified by the `Context.Key` is removed from the
+   * effect requirements after the implementation is provided.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * // Define a service for configuration
+   * const Config = Context.Service<{
+   *   apiUrl: string
+   *   timeout: number
+   * }>("Config")
+   *
+   * const fetchData = Effect.gen(function* () {
+   *   const config = yield* Effect.service(Config)
+   *   console.log(`Fetching from: ${config.apiUrl}`)
+   *   console.log(`Timeout: ${config.timeout}ms`)
+   *   return "data"
+   * })
+   *
+   * // Provide the service implementation
+   * const program = fetchData.provideService(Config, {
+   *   apiUrl: "https://api.example.com",
+   *   timeout: 5000
+   * })
+   *
+   * program.runPromise().then(console.log)
+   * // Output:
+   * // Fetching from: https://api.example.com
+   * // Timeout: 5000ms
+   * // data
+   * ```
+   *
+   * @see {@link provide} for providing multiple layers to an effect.
+   * @see {@link provideServiceEffect} for acquiring the service implementation effectfully.
+   * @see {@link provideContext} for providing a complete context.
+   */
+  provideService<I, S>(service: Context.Key<I, S>, implementation: S): Effect<A, E, Exclude<R, I>> {
+    return new Effect(_Effect.provideService(this._effect, service, implementation));
+  }
+
+  /**
+   * Provides one service to this effect using an effectful acquisition.
+   *
+   * **When to use**
+   *
+   * Use when the service implementation must be created by an effect and its
+   * acquisition failure should remain in the returned effect.
+   *
+   * **Details**
+   *
+   * `provideServiceEffect` runs the acquisition effect to produce the service
+   * implementation, removes that service from the wrapped effect's
+   * requirements, and leaves any other requirements to be provided later.
+   * Acquisition failures are included in the returned effect's error channel.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * // Define a database connection service
+   * interface DatabaseConnection {
+   *   readonly query: (sql: string) => string
+   * }
+   * const Database = Context.Service<DatabaseConnection>("Database")
+   *
+   * // Effect that creates a database connection
+   * const createConnection = Effect.sleep("100 millis").as({
+   *   query: (sql: string) => `Result for: ${sql}`
+   * })
+   *
+   * const program = Effect.gen(function* () {
+   *   const db = yield* Effect.service(Database)
+   *   return db.query("SELECT * FROM users")
+   * })
+   *
+   * // Provide the service through an effect
+   * const withDatabase = program.provideServiceEffect(Database, createConnection)
+   *
+   * withDatabase.runPromise().then(console.log)
+   * // Output: "Result for: SELECT * FROM users"
+   * ```
+   */
+  provideServiceEffect<I, S, E2, R2>(
+    service: Context.Key<I, S>,
+    acquire: Effect<S, E2, R2>
+  ): Effect<A, E | E2, Exclude<R, I> | R2> {
+    return new Effect(_Effect.provideServiceEffect(this._effect, service, acquire.effect));
+  }
+
+  /**
+   * Runs this effect with the provided context as its complete environment.
+   *
+   * **When to use**
+   *
+   * Use when you already have a `Context` containing every service required by
+   * the effect and want the wrapped effect to run with exactly that context.
+   *
+   * **Gotchas**
+   *
+   * `setContext` replaces the current context for the wrapped effect. Services
+   * from an outer context are not inherited unless they are also present in
+   * the context passed to `setContext`.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * const Config = Context.Service<{
+   *   readonly greeting: string
+   * }>("Config")
+   *
+   * const program = Effect.gen(function* () {
+   *   const config = yield* Effect.service(Config)
+   *   return `${config.greeting}, World!`
+   * })
+   *
+   * const runnable = program.setContext(Context.make(Config, { greeting: "Hello" }))
+   *
+   * runnable.runPromise().then(console.log)
+   * // Output: "Hello, World!"
+   * ```
+   *
+   * @see {@link provideContext} for partially satisfying an effect's context requirements.
+   * @see {@link updateContext} for deriving the required context from the current one.
+   */
+  setContext(context: Context.Context<R>): Effect<A, E> {
+    return new Effect(_Effect.setContext(this._effect, context));
+  }
+
+  /**
+   * Provides part of the required context while leaving the rest unchanged.
+   *
+   * **Details**
+   *
+   * This function allows you to transform the context required by an effect,
+   * providing part of the context and leaving the rest to be fulfilled later.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * // Define services
+   * const Logger = Context.Service<{
+   *   log: (msg: string) => void
+   * }>("Logger")
+   * const Config = Context.Service<{
+   *   name: string
+   * }>("Config")
+   *
+   * const program = Effect.service(Config).map((config) => `Hello ${config.name}!`)
+   *
+   * // Transform services by providing Config while keeping Logger requirement
+   * const configured = program.updateContext(
+   *   (context: Context.Context<typeof Logger.Identifier>) =>
+   *     Context.add(context, Config, { name: "World" })
+   * )
+   *
+   * // The effect now requires only Logger service
+   * const result = configured.provideService(Logger, {
+   *   log: (msg) => console.log(msg)
+   * })
+   * ```
+   */
+  updateContext<R2>(f: (context: Context.Context<R2>) => Context.Context<NoInfer<R>>): Effect<A, E, R2> {
+    return new Effect(_Effect.updateContext(this._effect, f));
+  }
+
+  /**
+   * Runs this effect with a service implementation transformed by the provided
+   * function.
+   *
+   * **Details**
+   *
+   * The service must be available in the effect's context; `updateService`
+   * replaces it for the wrapped effect with the value returned by the updater.
+   *
+   * @example
+   * ```ts
+   * import { Context } from "effect"
+   * import { Effect } from "effect-fluent"
+   *
+   * // Define a counter service
+   * const Counter = Context.Service<{ count: number }>("Counter")
+   *
+   * const program = Effect.gen(function* () {
+   *   const updatedCounter = yield* Effect.service(Counter)
+   *   console.log(`Updated count: ${updatedCounter.count}`)
+   *   return updatedCounter.count
+   * }).updateService(Counter, (counter) => ({ count: counter.count + 1 }))
+   *
+   * // Provide initial service and run
+   * const result = program.provideService(Counter, { count: 0 })
+   * result.runPromise().then(console.log)
+   * // Output: Updated count: 1
+   * // 1
+   * ```
+   */
+  updateService<I, S>(service: Context.Key<I, S>, f: (value: S) => S): Effect<A, E, R | I> {
+    return new Effect(_Effect.updateService(this._effect, service, f));
   }
 
   // --- Running ---

@@ -170,17 +170,17 @@ helpers that belong as statics on the fluent `Effect` class.
 
 ## Context / environment
 
-- [ ] `context`
-- [ ] `contextWith`
-- [ ] `provide`
-- [ ] `provideContext`
-- [ ] `provideService`
-- [ ] `provideServiceEffect`
-- [ ] `service`
-- [ ] `serviceOption`
-- [ ] `setContext`
-- [ ] `updateContext`
-- [ ] `updateService`
+- [x] `context`
+- [x] `contextWith`
+- [x] `provide`
+- [x] `provideContext`
+- [x] `provideService`
+- [x] `provideServiceEffect`
+- [x] `service`
+- [x] `serviceOption`
+- [x] `setContext`
+- [x] `updateContext`
+- [x] `updateService`
 
 ## Running
 
